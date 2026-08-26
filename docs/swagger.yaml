@@ -1,0 +1,278 @@
+openapi: 3.0.0
+info:
+  title: Woosh API Documentation
+  description: API endpoints for Woosh - The Women-led Bike Taxi Platform.
+  version: 1.0.0
+  contact:
+    name: Woosh Support
+    email: admin@woosh.com
+servers:
+  - url: http://localhost:5000/api/v1
+    description: Local Development Server
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    ApiResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        statusCode:
+          type: integer
+        message:
+          type: string
+        data:
+          type: object
+    
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        statusCode:
+          type: integer
+          example: 400
+        message:
+          type: string
+        errors:
+          type: array
+          items:
+            type: string
+
+security:
+  - bearerAuth: []
+
+paths:
+  /auth/send-otp:
+    post:
+      summary: Send OTP
+      tags:
+        - Auth
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - phoneNumber
+              properties:
+                phoneNumber:
+                  type: string
+                  example: "9876543210"
+      responses:
+        '200':
+          description: OTP sent successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /auth/verify-otp:
+    post:
+      summary: Verify OTP and Login
+      tags:
+        - Auth
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - phoneNumber
+                - otp
+              properties:
+                phoneNumber:
+                  type: string
+                  example: "9876543210"
+                otp:
+                  type: string
+                  example: "123456"
+                role:
+                  type: string
+                  enum: [passenger, rider]
+                  default: passenger
+      responses:
+        '200':
+          description: Successful verification (Returns JWT tokens)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '400':
+          description: Invalid OTP
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /passenger/profile:
+    get:
+      summary: Get Passenger Profile
+      tags:
+        - Passenger
+      responses:
+        '200':
+          description: Profile data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+    put:
+      summary: Update Passenger Profile
+      tags:
+        - Passenger
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: Anita Sharma
+                email:
+                  type: string
+                  example: anita@example.com
+                gender:
+                  type: string
+                  enum: [female, boy_below_14]
+      responses:
+        '200':
+          description: Profile updated
+
+  /rider/safety-checklist:
+    put:
+      summary: Submit Daily Safety Checklist
+      tags:
+        - Rider
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                hasHelmet:
+                  type: boolean
+                hasFirstAidKit:
+                  type: boolean
+                hasSanitaryPads:
+                  type: boolean
+                isPhoneCharged:
+                  type: boolean
+                hasFaceMask:
+                  type: boolean
+      responses:
+        '200':
+          description: Checklist updated
+
+  /ride/estimate:
+    post:
+      summary: Get Fare Estimate
+      tags:
+        - Ride
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pickup:
+                  type: object
+                  properties:
+                    latitude:
+                      type: number
+                    longitude:
+                      type: number
+                    address:
+                      type: string
+                drop:
+                  type: object
+                  properties:
+                    latitude:
+                      type: number
+                    longitude:
+                      type: number
+                    address:
+                      type: string
+      responses:
+        '200':
+          description: Estimated fare details
+
+  /ride/request:
+    post:
+      summary: Request a Ride
+      tags:
+        - Ride
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pickup:
+                  type: object
+                  properties:
+                    latitude:
+                      type: number
+                    longitude:
+                      type: number
+                    address:
+                      type: string
+                drop:
+                  type: object
+                  properties:
+                    latitude:
+                      type: number
+                    longitude:
+                      type: number
+                    address:
+                      type: string
+                paymentMethod:
+                  type: string
+                  enum: [cash, upi, wallet]
+      responses:
+        '200':
+          description: Ride requested
+
+  /payment/wallet/topup/order:
+    post:
+      summary: Create Razorpay Topup Order
+      tags:
+        - Payment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount:
+                  type: number
+                  example: 500
+      responses:
+        '200':
+          description: Order created
+
+  /admin/dashboard:
+    get:
+      summary: Admin Dashboard Stats
+      tags:
+        - Admin
+      responses:
+        '200':
+          description: Stats returned
