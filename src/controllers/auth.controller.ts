@@ -74,8 +74,8 @@ export const sendOTP = asyncHandler(async (req: Request, res: Response) => {
   res.status(200).json(
     new ApiResponse(200, 'OTP sent successfully', {
       phoneNumber,
-      // Only expose OTP in non-production environments
-      ...(process.env.NODE_ENV !== 'production' && { otp }),
+      // TODO: Remove OTP from response before going to production
+      otp,
     })
   );
 });
