@@ -55,6 +55,21 @@ export const startRideAssignmentCron = () => {
               );
             }
           }
+
+          // Socket IO fallback
+          import('../sockets/tracking.socket').then(({ ioInstance }) => {
+            if (ioInstance) {
+              ioInstance.to(`rider:${riderUser._id}`).emit('new_ride_request', {
+                rideId: ride._id,
+                pickup: ride.pickup,
+                drop: ride.drop,
+                fare: ride.estimatedFare,
+                distanceKm: ride.distanceKm,
+                passengerId: ride.passenger,
+              });
+            }
+          });
+
           console.log(`[Ride Assignment] Reassigned ride ${ride._id} to rider ${riderUser._id}`);
         } else {
           // If no more riders found, we could either extend timeout, or leave it for manual acceptance

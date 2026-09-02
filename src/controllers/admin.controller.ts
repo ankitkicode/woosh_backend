@@ -208,12 +208,64 @@ export const rejectRider = asyncHandler(async (req: Request, res: Response) => {
 });
 
 /**
+ * @route   PUT /api/v1/admin/riders/:id/documents/:docType/status
+ * @desc    Approve or reject a specific document
+ * @access  Protected (admin)
+ */
+export const updateDocumentStatus = asyncHandler(async (req: Request, res: Response) => {
+  const { id, docType } = req.params;
+  const { status, reason } = req.body;
+
+  if (!['APPROVED', 'REJECTED'].includes(status)) {
+    throw new ApiError(400, 'Invalid status');
+  }
+  if (status === 'REJECTED' && !reason) {
+    throw new ApiError(400, 'Rejection reason is required');
+  }
+
+  const profile = await RiderProfile.findById(id);
+  if (!profile) throw new ApiError(404, 'Rider profile not found');
+
+  const docIndex = profile.documents.findIndex(d => d.type === docType);
+  if (docIndex === -1) {
+    throw new ApiError(404, 'Document not found');
+  }
+
+  profile.documents[docIndex].status = status;
+  profile.documents[docIndex].rejectionReason = status === 'REJECTED' ? reason : undefined;
+
+  // Check overall KYC status based on documents
+  const allApproved = profile.documents.length > 0 && profile.documents.every(d => d.status === 'APPROVED');
+  const anyRejected = profile.documents.some(d => d.status === 'REJECTED');
+  
+  if (allApproved) {
+    profile.kycStatus = KYCStatus.APPROVED;
+    profile.kycRejectionReason = undefined;
+  } else if (anyRejected) {
+    profile.kycStatus = KYCStatus.REJECTED;
+    profile.kycRejectionReason = 'Some documents were rejected. Please review and re-upload.';
+  } else {
+    profile.kycStatus = KYCStatus.UNDER_REVIEW;
+    profile.kycRejectionReason = undefined;
+  }
+
+  await profile.save();
+  res.status(200).json(new ApiResponse(200, `Document ${status.toLowerCase()} successfully`, profile));
+});
+
+/**
  * @route   GET /api/v1/admin/rides/active
  * @desc    Get all active rides for monitoring
  * @access  Protected (admin)
  */
 export const getActiveRides = asyncHandler(async (req: Request, res: Response) => {
-  const rides = await Ride.find({ status: { $in: [RideStatus.ACCEPTED, RideStatus.STARTED, RideStatus.RIDER_ARRIVED] } })
+  const activeStatuses = [
+    RideStatus.REQUESTED, RideStatus.RIDER_SEARCH, RideStatus.RIDER_ASSIGNED,
+    RideStatus.ACCEPTED, RideStatus.RIDER_EN_ROUTE, RideStatus.RIDER_ARRIVED,
+    RideStatus.OTP_VERIFICATION, RideStatus.STARTED, RideStatus.IN_PROGRESS
+  ];
+
+  const rides = await Ride.find({ status: { $in: activeStatuses } })
     .populate('passenger', 'name phoneNumber')
     .populate('rider', 'name phoneNumber')
     .sort({ createdAt: -1 });

@@ -11,7 +11,10 @@ import { Ride } from '../models/Ride';
  *  - passenger:join_ride    → Passenger joins a ride room to get live updates
  *  - ride:sos               → SOS alert broadcasted to all admin sockets
  */
+export let ioInstance: Server;
+
 export const registerTrackingSocket = (io: Server) => {
+  ioInstance = io;
   io.on('connection', (socket: Socket) => {
     console.log(`[Socket] New connection: ${socket.id}`);
 
@@ -130,6 +133,22 @@ export const registerTrackingSocket = (io: Server) => {
     socket.on('admin:join', () => {
       socket.join('admin:room');
       console.log(`[Socket] Admin joined admin:room`);
+    });
+
+    /**
+     * Rider joins their personal room for direct notifications.
+     */
+    socket.on('rider:join_room', (data: { riderId: string }) => {
+      socket.join(`rider:${data.riderId}`);
+      console.log(`[Socket] Rider joined personal room: rider:${data.riderId}`);
+    });
+
+    /**
+     * Passenger joins their personal room for direct notifications.
+     */
+    socket.on('passenger:join_room', (data: { passengerId: string }) => {
+      socket.join(`passenger:${data.passengerId}`);
+      console.log(`[Socket] Passenger joined personal room: passenger:${data.passengerId}`);
     });
 
     socket.on('disconnect', () => {

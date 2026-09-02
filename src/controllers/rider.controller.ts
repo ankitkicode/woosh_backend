@@ -45,26 +45,56 @@ export const submitKYC = asyncHandler(async (req: Request, res: Response) => {
     throw new ApiError(400, 'At least one KYC document is required');
   }
 
-  const documents: { type: DocumentType; url: string; isVerified: boolean }[] = [];
+  const { vehicleNumber } = req.body;
+  let profile = await RiderProfile.findOne({ user: req.user?._id });
+  
   const docTypes = [
     DocumentType.AADHAAR, DocumentType.DRIVING_LICENSE, DocumentType.PAN, DocumentType.RC_BOOK,
     DocumentType.VEHICLE_INSURANCE, DocumentType.PUC, DocumentType.POLICE_VERIFICATION,
     DocumentType.FACE_VERIFICATION, DocumentType.SELFIE_VERIFICATION
   ];
-  for (const docType of docTypes) {
-    if (files[docType]?.[0]) {
-      documents.push({ type: docType, url: `/uploads/${files[docType][0].filename}`, isVerified: false });
-    }
-  }
 
-  const { vehicleNumber } = req.body;
-  let profile = await RiderProfile.findOne({ user: req.user?._id });
   if (profile) {
-    profile.documents = documents;
+    // Partial update
+    for (const docType of docTypes) {
+      if (files[docType]?.[0]) {
+        const existingDocIndex = profile.documents.findIndex(d => d.type === docType);
+        const newDoc = { 
+          type: docType, 
+          url: `/uploads/${files[docType][0].filename}`, 
+          status: 'PENDING' as 'PENDING',
+          rejectionReason: undefined
+        };
+        
+        if (existingDocIndex >= 0) {
+          profile.documents[existingDocIndex] = newDoc;
+        } else {
+          profile.documents.push(newDoc);
+        }
+      }
+    }
     profile.vehicleNumber = vehicleNumber || profile.vehicleNumber;
-    profile.kycStatus = KYCStatus.UNDER_REVIEW;
+    
+    // Check if any document is pending/rejected to update overall status
+    const hasRejected = profile.documents.some(d => d.status === 'REJECTED');
+    if (!hasRejected) {
+      profile.kycStatus = KYCStatus.UNDER_REVIEW;
+    }
+    
     await profile.save();
   } else {
+    // New profile
+    const documents: { type: DocumentType; url: string; status: 'PENDING'; rejectionReason?: string }[] = [];
+    for (const docType of docTypes) {
+      if (files[docType]?.[0]) {
+        documents.push({ 
+          type: docType, 
+          url: `/uploads/${files[docType][0].filename}`, 
+          status: 'PENDING'
+        });
+      }
+    }
+
     profile = await RiderProfile.create({
       user: req.user?._id,
       vehicleNumber,
@@ -75,7 +105,7 @@ export const submitKYC = asyncHandler(async (req: Request, res: Response) => {
     await User.findByIdAndUpdate(req.user?._id, { role: UserRole.RIDER });
   }
 
-  res.status(200).json(new ApiResponse(200, 'KYC submitted. Under review.', { kycStatus: profile.kycStatus }));
+  res.status(200).json(new ApiResponse(200, 'KYC submitted. Under review.', { kycStatus: profile.kycStatus, documents: profile.documents }));
 });
 
 /**

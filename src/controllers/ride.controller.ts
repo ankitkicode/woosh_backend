@@ -141,6 +141,20 @@ export const requestRide = asyncHandler(async (req: Request, res: Response) => {
           `Pickup: ${pickup.address || 'Nearby'} → ${drop.address || 'Destination'} | ₹${fare.totalFare}`,
           { rideId: ride._id.toString(), type: 'new_ride_request' }
       );
+      
+      // Also emit via socket.io for real-time app update
+      import('../sockets/tracking.socket').then(({ ioInstance }) => {
+        if (ioInstance) {
+          ioInstance.to(`rider:${initialAssignedRider.toString()}`).emit('new_ride_request', {
+            rideId: ride._id,
+            pickup: ride.pickup,
+            drop: ride.drop,
+            fare: ride.estimatedFare,
+            distanceKm: ride.distanceKm,
+            passengerId: ride.passenger,
+          });
+        }
+      });
   }
 
   // Send OTP to passenger via push notification
@@ -213,11 +227,39 @@ export const acceptRide = asyncHandler(async (req: Request, res: Response) => {
       `Your Woosh rider is on the way to pick you up.`,
       { rideId: ride._id.toString(), type: 'ride_accepted' }
     );
+    
+    // Emit via socket
+    import('../sockets/tracking.socket').then(({ ioInstance }) => {
+      if (ioInstance) {
+        ioInstance.to(`passenger:${ride.passenger}`).emit('ride_accepted', {
+          rideId: ride._id,
+          riderId: ride.rider,
+        });
+      }
+    });
   } catch (err) {
     console.error('[FCM] Error notifying passenger of acceptance:', err);
   }
 
   res.status(200).json(new ApiResponse(200, 'Ride accepted', ride));
+});
+
+/**
+ * @route   PUT /api/v1/ride/:id/reject
+ * @desc    Rider rejects a ride request
+ * @access  Protected (rider)
+ */
+export const rejectRide = asyncHandler(async (req: Request, res: Response) => {
+  const ride = await Ride.findOne({ _id: req.params.id, status: RideStatus.REQUESTED });
+  if (!ride) throw new ApiError(404, 'Ride not found or already accepted');
+
+  if (ride.assignedRider && ride.assignedRider.toString() === req.user?._id) {
+    // Clear assignment so cron can pick it up immediately
+    ride.assignmentExpiresAt = new Date(); 
+    await ride.save();
+  }
+
+  res.status(200).json(new ApiResponse(200, 'Ride rejected', null));
 });
 
 /**

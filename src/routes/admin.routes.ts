@@ -3,7 +3,7 @@ import { protect } from '../middlewares/auth.middleware';
 import { authorize } from '../middlewares/role.middleware';
 import { UserRole } from '../config/constants';
 import {
-  getDashboard, getPendingRiders, approveRider, rejectRider,
+  getDashboard, getPendingRiders, approveRider, rejectRider, updateDocumentStatus,
   getAllRiders, getRiderById,
   getActiveRides, getDisputes, resolveDispute,
   getUsers, getSOSAlerts, getInsuranceClaims,
@@ -30,6 +30,7 @@ router.get('/riders/pending', getPendingRiders);
 router.get('/riders/:id', getRiderById);
 router.put('/riders/:id/approve', approveRider);
 router.put('/riders/:id/reject', rejectRider);
+router.put('/riders/:id/documents/:docType/status', updateDocumentStatus);
 router.get('/rides/active', getActiveRides);
 router.get('/disputes', getDisputes);
 router.put('/disputes/:id/resolve', resolveDispute);

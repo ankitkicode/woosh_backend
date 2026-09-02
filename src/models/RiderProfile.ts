@@ -4,7 +4,8 @@ import { KYCStatus, DocumentType } from '../config/constants';
 interface IDocument {
   type: DocumentType;
   url: string;
-  isVerified: boolean;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  rejectionReason?: string;
 }
 
 interface ILocation {
@@ -54,7 +55,8 @@ const riderProfileSchema = new Schema<IRiderProfile>(
       {
         type: { type: String, enum: Object.values(DocumentType) },
         url: { type: String },
-        isVerified: { type: Boolean, default: false },
+        status: { type: String, enum: ['PENDING', 'APPROVED', 'REJECTED'], default: 'PENDING' },
+        rejectionReason: { type: String },
       },
     ],
     isOnline: { type: Boolean, default: false },

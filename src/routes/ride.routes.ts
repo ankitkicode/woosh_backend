@@ -3,7 +3,7 @@ import { protect } from '../middlewares/auth.middleware';
 import { validate } from '../middlewares/validate.middleware';
 import {
   estimateFare, requestRide, getNearbyRiders,
-  acceptRide, riderArrived, startRide, completeRide, cancelRide,
+  acceptRide, rejectRide, riderArrived, startRide, completeRide, cancelRide,
   getRideDetails, getRideHistory, rateRide,
 } from '../controllers/ride.controller';
 import { rideEstimateSchema, requestRideSchema, cancelRideSchema } from '../validations/ride.validation';
@@ -39,6 +39,7 @@ router.get('/nearby-riders', getNearbyRiders);
 router.get('/history', getRideHistory);
 router.get('/:id', getRideDetails);
 router.put('/:id/accept', acceptRide);
+router.put('/:id/reject', rejectRide);
 router.put('/:id/arrived', riderArrived);
 router.put('/:id/start', 
   /*  #swagger.parameters['body'] = {

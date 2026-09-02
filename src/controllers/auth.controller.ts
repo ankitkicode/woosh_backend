@@ -4,6 +4,7 @@ import { ApiResponse } from '../utils/ApiResponse';
 import { ApiError } from '../utils/ApiError';
 import { User } from '../models/User';
 import { OTP } from '../models/OTP';
+import { RiderProfile } from '../models/RiderProfile';
 import { generateOTP, getOTPExpiry } from '../utils/generateOTP';
 import {
   generateAccessToken,
@@ -51,7 +52,36 @@ export const verifyGender = asyncHandler(async (req: Request, res: Response) => 
  * @access  Public
  */
 export const sendOTP = asyncHandler(async (req: Request, res: Response) => {
-  const { phoneNumber } = req.body;
+  const { phoneNumber, role, action } = req.body;
+
+  if (!phoneNumber) {
+    throw new ApiError(400, 'Phone number is required');
+  }
+
+  // Cross-role and login validation logic
+  console.log(`[sendOTP] Role: ${role}, Action: ${action}, Phone: ${phoneNumber}`);
+  if (role === UserRole.RIDER) {
+    const existingUser = await User.findOne({ phoneNumber });
+    console.log(`[sendOTP] Existing User: ${existingUser ? existingUser.role : 'NULL'}`);
+    
+    if (action === 'login') {
+      if (!existingUser || existingUser.role !== UserRole.RIDER) {
+        throw new ApiError(403, 'Aapko pehle registration complete karna hoga.');
+      }
+      const riderProfile = await RiderProfile.findOne({ user: existingUser._id });
+      if (!riderProfile) {
+        throw new ApiError(403, 'Aapko pehle registration complete karna hoga.');
+      }
+    } else if (action === 'register') {
+      if (existingUser && existingUser.role === UserRole.PASSENGER) {
+        throw new ApiError(403, 'This number is already registered as a Passenger. Please use a different number for Rider registration.');
+      }
+      // If user exists and is a rider, they should login, not register.
+      if (existingUser && existingUser.role === UserRole.RIDER) {
+        throw new ApiError(403, 'You are already registered. Please login instead.');
+      }
+    }
+  }
 
   // Invalidate previous OTPs for this number
   await OTP.deleteMany({ phoneNumber });

@@ -5,6 +5,8 @@ export const sendOTPSchema = z.object({
     .string()
     .trim()
     .regex(/^[6-9]\d{9}$/, 'Please enter a valid 10-digit Indian mobile number'),
+  role: z.enum(['passenger', 'rider', 'admin', 'super_admin']).optional(),
+  action: z.enum(['login', 'register']).optional(),
 });
 
 export const verifyOTPSchema = z.object({
