@@ -114,7 +114,7 @@ export const submitKYC = asyncHandler(async (req: Request, res: Response) => {
  * @access  Protected (rider)
  */
 export const getKYCStatus = asyncHandler(async (req: Request, res: Response) => {
-  const profile = await RiderProfile.findOne({ user: req.user?._id }).select('kycStatus kycRejectionReason');
+  const profile = await RiderProfile.findOne({ user: req.user?._id }).select('kycStatus kycRejectionReason safetyChecklist');
   if (!profile) throw new ApiError(404, 'Rider profile not found. Please submit KYC first.');
   res.status(200).json(new ApiResponse(200, 'KYC status fetched', profile));
 });

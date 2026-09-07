@@ -13,9 +13,7 @@ export class FaceService {
     const apiSecret = process.env.FACEPP_API_SECRET;
 
     if (!apiKey || !apiSecret) {
-      // Mock mode if credentials are not provided (useful for local dev testing)
-      console.warn('Face++ credentials missing. Running in mock mode. Assuming female.');
-      return { isFemale: true, message: 'Mock verification passed' };
+      throw new Error('Face++ credentials are not configured in .env');
     }
 
     try {

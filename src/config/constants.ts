@@ -114,7 +114,7 @@ export const OTP_EXPIRY_MINUTES = 10;
 export const MAX_OTP_ATTEMPTS = 5;
 
 // Rider search radius in km
-export const RIDER_SEARCH_RADIUS_KM = 5;
+export const RIDER_SEARCH_RADIUS_KM = 50000; // Increased to 50000 for easier local testing without strict location matching
 
 // Max children allowed per passenger account
 export const MAX_CHILDREN_PER_ACCOUNT = 5;

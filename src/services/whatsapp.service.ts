@@ -1,4 +1,6 @@
 import axios from 'axios';
+import dotenv from 'dotenv';
+dotenv.config();
 
 const META_WHATSAPP_TOKEN = process.env.META_WHATSAPP_TOKEN || '';
 const META_PHONE_NUMBER_ID = process.env.META_PHONE_NUMBER_ID || '';
@@ -55,7 +57,6 @@ export const whatsappService = {
     if (!META_WHATSAPP_TOKEN || !META_PHONE_NUMBER_ID) {
       throw new Error('Meta WhatsApp credentials are not configured in .env');
     }
-
     try {
       const formattedNumber = phoneNumber.startsWith('+') ? phoneNumber.substring(1) : `91${phoneNumber}`;
       
@@ -67,7 +68,7 @@ export const whatsappService = {
           type: 'template',
           template: {
             name: META_WHATSAPP_OTP_TEMPLATE,
-            language: { code: 'en' },
+            language: { code: 'en_US' },
             components: [
               {
                 type: 'body',

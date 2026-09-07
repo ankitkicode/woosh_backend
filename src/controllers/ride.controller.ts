@@ -143,8 +143,10 @@ export const requestRide = asyncHandler(async (req: Request, res: Response) => {
       );
       
       // Also emit via socket.io for real-time app update
-      import('../sockets/tracking.socket').then(({ ioInstance }) => {
+      try {
+        const { ioInstance } = await import('../sockets/tracking.socket');
         if (ioInstance) {
+          console.log(`[Socket] Emitting new_ride_request to rider:${initialAssignedRider.toString()}`);
           ioInstance.to(`rider:${initialAssignedRider.toString()}`).emit('new_ride_request', {
             rideId: ride._id,
             pickup: ride.pickup,
@@ -153,21 +155,15 @@ export const requestRide = asyncHandler(async (req: Request, res: Response) => {
             distanceKm: ride.distanceKm,
             passengerId: ride.passenger,
           });
+          console.log('[Socket] Successfully emitted new_ride_request');
+        } else {
+          console.error('[Socket] ioInstance is undefined in requestRide');
         }
-      });
+      } catch (err) {
+        console.error('[Socket] Error emitting new_ride_request:', err);
+      }
   }
 
-  // Send OTP to passenger via push notification
-  try {
-    await fcmService.sendToUser(
-      req.user?._id || '',
-      '🔒 Your Ride OTP',
-      `Your ride verification OTP is: ${ride.otp}. Share this with your rider when they arrive.`,
-      { rideOtp: ride.otp, rideId: ride._id.toString(), type: 'ride_otp' }
-    );
-  } catch (err) {
-    console.error('[FCM] Error sending ride OTP:', err);
-  }
 
   res.status(201).json(new ApiResponse(201, 'Ride requested. Searching for riders...', ride));
 });
@@ -203,7 +199,7 @@ export const getNearbyRiders = asyncHandler(async (req: Request, res: Response) 
  * @access  Protected (rider)
  */
 export const acceptRide = asyncHandler(async (req: Request, res: Response) => {
-  const ride = await Ride.findOne({ _id: req.params.id, status: RideStatus.REQUESTED });
+  const ride = await Ride.findOne({ _id: req.params.id, status: RideStatus.REQUESTED }).populate('passenger');
   if (!ride) throw new ApiError(404, 'Ride not found or already accepted');
 
   // Verify Assignment
@@ -221,24 +217,31 @@ export const acceptRide = asyncHandler(async (req: Request, res: Response) => {
 
   // Notify passenger that rider accepted
   try {
+    const passengerUser = ride.passenger as any;
+    
+    // Send WhatsApp OTP since the ride is now confirmed
+    if (passengerUser && passengerUser.phoneNumber) {
+      await whatsappService.sendOTP(passengerUser.phoneNumber, ride.otp);
+    }
+
     await fcmService.sendToUser(
-      ride.passenger.toString(),
+      passengerUser._id.toString(),
       '🎉 Rider Assigned!',
-      `Your Woosh rider is on the way to pick you up.`,
+      `Your Woosh rider is on the way to pick you up. OTP: ${ride.otp}`,
       { rideId: ride._id.toString(), type: 'ride_accepted' }
     );
     
     // Emit via socket
     import('../sockets/tracking.socket').then(({ ioInstance }) => {
       if (ioInstance) {
-        ioInstance.to(`passenger:${ride.passenger}`).emit('ride_accepted', {
+        ioInstance.to(`passenger:${passengerUser._id.toString()}`).emit('ride_accepted', {
           rideId: ride._id,
           riderId: ride.rider,
         });
       }
     });
   } catch (err) {
-    console.error('[FCM] Error notifying passenger of acceptance:', err);
+    console.error('[Notification] Error notifying passenger of acceptance:', err);
   }
 
   res.status(200).json(new ApiResponse(200, 'Ride accepted', ride));

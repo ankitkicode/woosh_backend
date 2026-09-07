@@ -1,0 +1,1237 @@
+{
+  "info": {
+    "name": "Woosh Backend API",
+    "description": "Complete API documentation for Woosh Ride-Sharing Platform.\n\n## Base URL\n- **Local**: `http://localhost:5001/api/v1`\n- **Production**: `https://wooshride.in/api/v1`\n\n## Authentication\nMost endpoints require a Bearer token in the `Authorization` header.\n1. Call **Send OTP** to get an OTP on WhatsApp.\n2. Call **Verify OTP** to get `accessToken` + `refreshToken`.\n3. Use `accessToken` as Bearer token for protected endpoints.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5001/api/v1",
+      "type": "string"
+    },
+    {
+      "key": "accessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "refreshToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "rideId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "userId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "riderId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "childProfileId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "disputeId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "sosAlertId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Auth",
+      "description": "Authentication endpoints for OTP-based login/registration.",
+      "item": [
+        {
+          "name": "1.1 Verify Gender (Face++ Selfie)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "selfie",
+                  "type": "file",
+                  "src": "",
+                  "description": "(Required) Selfie image file. Must contain exactly one female face."
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/verify-gender",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "verify-gender"
+              ]
+            },
+            "description": "**Upload a selfie to verify gender via Face++ API.**"
+          }
+        },
+        {
+          "name": "1.2 Send OTP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('OTP sent successfully', function () { pm.response.to.have.status(200); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phoneNumber\": \"9876543210\",\n  \"role\": \"passenger\",\n  \"action\": \"login\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/send-otp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "send-otp"
+              ]
+            },
+            "description": "**Send a 6-digit OTP to the user's WhatsApp number.**"
+          }
+        },
+        {
+          "name": "1.3 Verify OTP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json(); if (res.data && res.data.accessToken) { pm.collectionVariables.set('accessToken', res.data.accessToken); pm.collectionVariables.set('refreshToken', res.data.refreshToken); pm.collectionVariables.set('userId', res.data.user._id); } pm.test('OTP verified', function () { pm.response.to.have.status(200); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phoneNumber\": \"9876543210\",\n  \"otp\": \"123456\",\n  \"role\": \"passenger\",\n  \"deviceId\": \"postman-test-device\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/verify-otp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "verify-otp"
+              ]
+            },
+            "description": "**Verify the OTP and receive access + refresh tokens.**"
+          }
+        },
+        {
+          "name": "1.4 Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json(); if (res.data) { pm.collectionVariables.set('accessToken', res.data.accessToken); pm.collectionVariables.set('refreshToken', res.data.refreshToken); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\",\n  \"deviceId\": \"postman-test-device\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/refresh-token",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "refresh-token"
+              ]
+            },
+            "description": "**Generate a new access token using the refresh token.**"
+          }
+        },
+        {
+          "name": "1.5 Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deviceId\": \"postman-test-device\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "**Logout from current device.**"
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Passenger",
+      "description": "Passenger-specific endpoints.",
+      "item": [
+        {
+          "name": "2.1 Get Profile",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/passenger/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "passenger",
+                "profile"
+              ]
+            },
+            "description": "**Get the current passenger's profile.**"
+          }
+        },
+        {
+          "name": "2.2 Update Profile",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Priya Sharma\",\n  \"email\": \"priya@example.com\",\n  \"gender\": \"female\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/passenger/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "passenger",
+                "profile"
+              ]
+            },
+            "description": "**Update passenger profile.**"
+          }
+        },
+        {
+          "name": "2.3 Add Child Profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json(); if (res.data && res.data._id) { pm.collectionVariables.set('childProfileId', res.data._id); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Aarav\",\n  \"age\": 8,\n  \"schoolName\": \"Delhi Public School\",\n  \"emergencyContactName\": \"Priya Sharma\",\n  \"emergencyContactPhone\": \"9876543210\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/passenger/children",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "passenger",
+                "children"
+              ]
+            },
+            "description": "**Add a child profile**."
+          }
+        },
+        {
+          "name": "2.4 Get Child Profiles",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/passenger/children",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "passenger",
+                "children"
+              ]
+            }
+          }
+        },
+        {
+          "name": "2.5 Submit Dispute",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category\": \"fare\",\n  \"subject\": \"Overcharged for ride\",\n  \"description\": \"I was charged ₹500...\",\n  \"rideId\": \"{{rideId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/passenger/disputes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "passenger",
+                "disputes"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Rider",
+      "description": "Rider-specific endpoints.",
+      "item": [
+        {
+          "name": "3.1 Get Rider Profile",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rider/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rider",
+                "profile"
+              ]
+            }
+          }
+        },
+        {
+          "name": "3.2 Update Rider Profile",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Anjali Driver\",\n  \"vehicleNumber\": \"MP07AB1234\",\n  \"vehicleModel\": \"Honda Activa 6G\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/rider/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rider",
+                "profile"
+              ]
+            }
+          }
+        },
+        {
+          "name": "3.3 Submit KYC Documents",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "aadhaar",
+                  "type": "file",
+                  "src": ""
+                },
+                {
+                  "key": "driving_license",
+                  "type": "file",
+                  "src": ""
+                },
+                {
+                  "key": "rc_book",
+                  "type": "file",
+                  "src": ""
+                },
+                {
+                  "key": "vehicleNumber",
+                  "value": "MP07AB1234",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/rider/kyc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rider",
+                "kyc"
+              ]
+            }
+          }
+        },
+        {
+          "name": "3.4 Get KYC Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rider/kyc/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rider",
+                "kyc",
+                "status"
+              ]
+            }
+          }
+        },
+        {
+          "name": "3.5 Update Safety Checklist",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"helmetAvailable\": true,\n  \"firstAidKitAvailable\": true,\n  \"sanitaryPadsAvailable\": true,\n  \"phoneBatteryCheck\": true,\n  \"faceVerified\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/rider/safety-checklist",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rider",
+                "safety-checklist"
+              ]
+            }
+          }
+        },
+        {
+          "name": "3.6 Toggle Online/Offline",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rider/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rider",
+                "status"
+              ]
+            }
+          }
+        },
+        {
+          "name": "3.7 Get Earnings",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rider/earnings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rider",
+                "earnings"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Ride",
+      "description": "Ride lifecycle endpoints.",
+      "item": [
+        {
+          "name": "4.1 Estimate Fare",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pickup\": { \"latitude\": 25.4498, \"longitude\": 78.5692, \"address\": \"Civil Lines, Jhansi\" },\n  \"drop\": { \"latitude\": 25.6653, \"longitude\": 78.4609, \"address\": \"Datia\" },\n  \"city\": \"jhansi\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/ride/estimate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ride",
+                "estimate"
+              ]
+            }
+          }
+        },
+        {
+          "name": "4.2 Request Ride",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json(); if (res.data && res.data._id) { pm.collectionVariables.set('rideId', res.data._id); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pickup\": { \"latitude\": 25.4498, \"longitude\": 78.5692, \"address\": \"Civil Lines, Jhansi\" },\n  \"drop\": { \"latitude\": 25.6653, \"longitude\": 78.4609, \"address\": \"Datia\" },\n  \"paymentMethod\": \"cash\",\n  \"city\": \"jhansi\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/ride/request",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ride",
+                "request"
+              ]
+            }
+          }
+        },
+        {
+          "name": "4.3 Get Nearby Riders",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride/nearby-riders?latitude=25.4498&longitude=78.5692",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ride",
+                "nearby-riders"
+              ],
+              "query": [
+                {
+                  "key": "latitude",
+                  "value": "25.4498"
+                },
+                {
+                  "key": "longitude",
+                  "value": "78.5692"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "4.4 Get Ride Details",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride/{{rideId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ride",
+                "{{rideId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "4.5 Accept Ride (Rider)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride/{{rideId}}/accept",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ride",
+                "{{rideId}}",
+                "accept"
+              ]
+            }
+          }
+        },
+        {
+          "name": "4.7 Rider Arrived",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride/{{rideId}}/arrived",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ride",
+                "{{rideId}}",
+                "arrived"
+              ]
+            }
+          }
+        },
+        {
+          "name": "4.8 Start Ride (OTP)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"otp\": \"1234\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/ride/{{rideId}}/start",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ride",
+                "{{rideId}}",
+                "start"
+              ]
+            }
+          }
+        },
+        {
+          "name": "4.9 Complete Ride",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride/{{rideId}}/complete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ride",
+                "{{rideId}}",
+                "complete"
+              ]
+            }
+          }
+        },
+        {
+          "name": "4.10 Cancel Ride",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Passenger not responding\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/ride/{{rideId}}/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ride",
+                "{{rideId}}",
+                "cancel"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Tracking",
+      "description": "Real-time tracking & SOS endpoints.",
+      "item": [
+        {
+          "name": "5.1 Update Location (Rider)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"latitude\": 25.4498,\n  \"longitude\": 78.5692\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/tracking/location",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tracking",
+                "location"
+              ]
+            }
+          }
+        },
+        {
+          "name": "5.2 Get Ride Location (Passenger)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tracking/ride/{{rideId}}/location",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tracking",
+                "ride",
+                "{{rideId}}",
+                "location"
+              ]
+            }
+          }
+        },
+        {
+          "name": "5.3 Trigger SOS",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rideId\": \"{{rideId}}\",\n  \"latitude\": 25.4498,\n  \"longitude\": 78.5692,\n  \"address\": \"Civil Lines, Jhansi\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/tracking/sos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tracking",
+                "sos"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Payment",
+      "description": "Wallet & payment endpoints.",
+      "item": [
+        {
+          "name": "6.1 Get Wallet Balance",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payment/wallet",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payment",
+                "wallet"
+              ]
+            }
+          }
+        },
+        {
+          "name": "6.2 Create Topup Order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 500\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/payment/wallet/topup/order",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payment",
+                "wallet",
+                "topup",
+                "order"
+              ]
+            }
+          }
+        },
+        {
+          "name": "6.3 Verify Topup Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"razorpay_order_id\": \"order_xxx\",\n  \"razorpay_payment_id\": \"pay_xxx\",\n  \"razorpay_signature\": \"signature_xxx\",\n  \"amount\": 500\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/payment/wallet/topup/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payment",
+                "wallet",
+                "topup",
+                "verify"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Admin",
+      "description": "Admin panel endpoints.",
+      "item": [
+        {
+          "name": "7.1 Admin Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json(); if (res.data && res.data.accessToken) { pm.collectionVariables.set('accessToken', res.data.accessToken); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@wooshride.in\",\n  \"password\": \"your_admin_password\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "login"
+              ]
+            }
+          }
+        },
+        {
+          "name": "7.2 Dashboard Stats",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/dashboard",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "dashboard"
+              ]
+            }
+          }
+        },
+        {
+          "name": "7.3 Get All Riders",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/riders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "riders"
+              ]
+            }
+          }
+        },
+        {
+          "name": "7.6 Approve Rider",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/riders/{{riderId}}/approve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "riders",
+                "{{riderId}}",
+                "approve"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

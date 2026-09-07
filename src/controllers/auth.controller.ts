@@ -66,11 +66,11 @@ export const sendOTP = asyncHandler(async (req: Request, res: Response) => {
     
     if (action === 'login') {
       if (!existingUser || existingUser.role !== UserRole.RIDER) {
-        throw new ApiError(403, 'Aapko pehle registration complete karna hoga.');
+        throw new ApiError(403, 'You must complete registration first.');
       }
       const riderProfile = await RiderProfile.findOne({ user: existingUser._id });
       if (!riderProfile) {
-        throw new ApiError(403, 'Aapko pehle registration complete karna hoga.');
+        throw new ApiError(403, 'You must complete registration first.');
       }
     } else if (action === 'register') {
       if (existingUser && existingUser.role === UserRole.PASSENGER) {
@@ -95,17 +95,12 @@ export const sendOTP = asyncHandler(async (req: Request, res: Response) => {
   console.log(`📲 OTP for ${phoneNumber}: ${otp}`);
   console.log(`========================================\n`);
 
-  // Use smsService and whatsappService to send the generated OTP
-  // await Promise.all([
-  //   smsService.sendOTP(phoneNumber, otp),
-  //   whatsappService.sendOTP(phoneNumber, otp)
-  // ]);
+  // Use whatsappService to send the generated OTP
+  await whatsappService.sendOTP(phoneNumber, otp);
 
   res.status(200).json(
     new ApiResponse(200, 'OTP sent successfully', {
       phoneNumber,
-      // TODO: Remove OTP from response before going to production
-      otp,
     })
   );
 });
