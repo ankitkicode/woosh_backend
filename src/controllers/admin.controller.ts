@@ -208,6 +208,24 @@ export const rejectRider = asyncHandler(async (req: Request, res: Response) => {
 });
 
 /**
+ * @route   DELETE /api/v1/admin/riders/:id
+ * @desc    Delete a rider profile and associated user
+ * @access  Protected (admin)
+ */
+export const deleteRider = asyncHandler(async (req: Request, res: Response) => {
+  const profile = await RiderProfile.findById(req.params.id);
+  if (!profile) throw new ApiError(404, 'Rider profile not found');
+
+  // Delete the associated user
+  await User.findByIdAndDelete(profile.user);
+  
+  // Delete the rider profile
+  await RiderProfile.findByIdAndDelete(req.params.id);
+
+  res.status(200).json(new ApiResponse(200, 'Rider deleted successfully', null));
+});
+
+/**
  * @route   PUT /api/v1/admin/riders/:id/documents/:docType/status
  * @desc    Approve or reject a specific document
  * @access  Protected (admin)

@@ -4,7 +4,7 @@ import { authorize } from '../middlewares/role.middleware';
 import { UserRole } from '../config/constants';
 import {
   getDashboard, getPendingRiders, approveRider, rejectRider, updateDocumentStatus,
-  getAllRiders, getRiderById,
+  getAllRiders, getRiderById, deleteRider,
   getActiveRides, getDisputes, resolveDispute,
   getUsers, getSOSAlerts, getInsuranceClaims,
   banUser, unbanUser, resolveSOSAlert, adminLogin
@@ -28,6 +28,7 @@ router.get('/dashboard', getDashboard);
 router.get('/riders', getAllRiders);
 router.get('/riders/pending', getPendingRiders);
 router.get('/riders/:id', getRiderById);
+router.delete('/riders/:id', deleteRider);
 router.put('/riders/:id/approve', approveRider);
 router.put('/riders/:id/reject', rejectRider);
 router.put('/riders/:id/documents/:docType/status', updateDocumentStatus);
