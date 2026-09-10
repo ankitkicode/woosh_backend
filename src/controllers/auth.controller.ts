@@ -86,7 +86,17 @@ export const sendOTP = asyncHandler(async (req: Request, res: Response) => {
   // Invalidate previous OTPs for this number
   await OTP.deleteMany({ phoneNumber });
 
-  const otp = generateOTP(6);
+
+  
+
+  let otp = generateOTP(6);
+  
+  if (role === UserRole.RIDER && phoneNumber === '9876543210') {
+    otp = '123456';
+  } else if (role === UserRole.PASSENGER && phoneNumber === '9876543211') {
+    otp = '123456';
+  }
+
   const expiresAt = getOTPExpiry(OTP_EXPIRY_MINUTES);
 
   await OTP.create({ phoneNumber, otp, expiresAt });
@@ -95,8 +105,17 @@ export const sendOTP = asyncHandler(async (req: Request, res: Response) => {
   console.log(`📲 OTP for ${phoneNumber}: ${otp}`);
   console.log(`========================================\n`);
 
-  // Use whatsappService to send the generated OTP
-  await whatsappService.sendOTP(phoneNumber, otp);
+  // Use whatsappService to send the generated OTP (Skip for test numbers)
+  if (phoneNumber !== '9876543210' && phoneNumber !== '9876543211') {
+    try {
+      await whatsappService.sendOTP(phoneNumber, otp);
+    } catch (error) {
+      console.error(`[WhatsApp] Failed to send OTP to ${phoneNumber}:`, error);
+      throw new ApiError(500, 'Failed to send OTP via WhatsApp. Please try again later.');
+    }
+  } else {
+    console.log(`[WhatsApp] Skipped sending OTP for test number ${phoneNumber}`);
+  }
 
   res.status(200).json(
     new ApiResponse(200, 'OTP sent successfully', {
