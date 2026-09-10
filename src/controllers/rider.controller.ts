@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import { asyncHandler } from '../utils/asyncHandler';
 import { ApiResponse } from '../utils/ApiResponse';
 import { ApiError } from '../utils/ApiError';
@@ -201,12 +202,12 @@ export const getEarnings = asyncHandler(async (req: Request, res: Response) => {
     Ride.aggregate([
       { 
         $match: { 
-          rider: req.user?._id, 
+          rider: new mongoose.Types.ObjectId(req.user?._id), 
           status: { $in: [RideStatus.COMPLETED, RideStatus.PAYMENT_COMPLETED] },
           rideEndedAt: { $gte: startOfDay }
         } 
       },
-      { $group: { _id: null, total: { $sum: "$finalFare" } } }
+      { $group: { _id: null, total: { $sum: "$finalFare" }, count: { $sum: 1 } } }
     ]),
     Ride.aggregate([
       { 
@@ -216,12 +217,14 @@ export const getEarnings = asyncHandler(async (req: Request, res: Response) => {
           rideEndedAt: { $gte: startOfMonth }
         } 
       },
-      { $group: { _id: null, total: { $sum: "$finalFare" } } }
+      { $group: { _id: null, total: { $sum: "$finalFare" }, count: { $sum: 1 } } }
     ])
   ]);
 
   const todayEarnings = dailyResult[0]?.total || 0;
+  const todayRides = dailyResult[0]?.count || 0;
   const monthlyEarnings = monthlyResult[0]?.total || 0;
+  const monthlyRides = monthlyResult[0]?.count || 0;
 
   res.status(200).json(new ApiResponse(200, 'Earnings fetched', {
     summary: { 
@@ -230,7 +233,9 @@ export const getEarnings = asyncHandler(async (req: Request, res: Response) => {
       totalRides: profile.totalRides, 
       rating: profile.rating,
       todayEarnings,
-      monthlyEarnings
+      todayRides,
+      monthlyEarnings,
+      monthlyRides
     },
     recentTransactions,
   }));
