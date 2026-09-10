@@ -10,7 +10,7 @@ import { calculateFare } from '../utils/fareCalculator';
 import { mapsService } from '../services/maps.service';
 import { fcmService } from '../services/fcm.service';
 import { whatsappService } from '../services/whatsapp.service';
-import { RideStatus, CancellationBy, UserRole, RIDER_SEARCH_RADIUS_KM } from '../config/constants';
+import { RideStatus, CancellationBy, UserRole, RIDER_SEARCH_RADIUS_KM, PaymentStatus } from '../config/constants';
 
 const generateRideOTP = (): string => String(crypto.randomInt(1000, 9999));
 
@@ -289,6 +289,16 @@ export const riderArrived = asyncHandler(async (req: Request, res: Response) => 
     console.error('[FCM] Error notifying passenger of arrival:', err);
   }
 
+  // Socket notification
+  import('../sockets/tracking.socket').then(({ ioInstance }) => {
+    if (ioInstance) {
+      ioInstance.to(`passenger:${ride.passenger.toString()}`).emit('rider_arrived', {
+        rideId: ride._id,
+        otp: ride.otp,
+      });
+    }
+  });
+
   res.status(200).json(new ApiResponse(200, 'Marked as arrived at pickup', ride));
 });
 
@@ -311,6 +321,15 @@ export const startRide = asyncHandler(async (req: Request, res: Response) => {
     req.user?.phoneNumber || '', 
     `https://woosh.com/track/${ride._id}`
   );
+
+  // Socket notification
+  import('../sockets/tracking.socket').then(({ ioInstance }) => {
+    if (ioInstance) {
+      ioInstance.to(`passenger:${ride.passenger.toString()}`).emit('ride_started', {
+        rideId: ride._id,
+      });
+    }
+  });
 
   res.status(200).json(new ApiResponse(200, 'Ride started', ride));
 });
@@ -360,6 +379,16 @@ export const completeRide = asyncHandler(async (req: Request, res: Response) => 
     console.error('[FCM] Error notifying passenger of completion:', err);
   }
 
+  // Socket notification
+  import('../sockets/tracking.socket').then(({ ioInstance }) => {
+    if (ioInstance) {
+      ioInstance.to(`passenger:${ride.passenger.toString()}`).emit('ride_completed', {
+        rideId: ride._id,
+        fare: ride.finalFare,
+      });
+    }
+  });
+
   res.status(200).json(new ApiResponse(200, 'Ride completed', {
     ride,
     payment: {
@@ -373,6 +402,23 @@ export const completeRide = asyncHandler(async (req: Request, res: Response) => 
         : 'Show QR code to passenger or wait for online payment.',
     }
   }));
+});
+
+/**
+ * @route   PUT /api/v1/ride/:id/confirm-payment
+ * @desc    Rider confirms cash collected
+ * @access  Protected (rider)
+ */
+export const confirmPayment = asyncHandler(async (req: Request, res: Response) => {
+  const ride = await Ride.findOne({ _id: req.params.id, rider: req.user?._id, status: RideStatus.COMPLETED });
+  if (!ride) throw new ApiError(404, 'Ride not found or not completed');
+  
+  // Set the payment status to paid
+  ride.paymentStatus = PaymentStatus.PAID;
+  ride.status = RideStatus.PAYMENT_COMPLETED;
+  await ride.save();
+
+  res.status(200).json(new ApiResponse(200, 'Payment confirmed', ride));
 });
 
 /**
@@ -394,7 +440,57 @@ export const cancelRide = asyncHandler(async (req: Request, res: Response) => {
   ride.status = cancelledBy === CancellationBy.PASSENGER ? RideStatus.PASSENGER_CANCELLED : RideStatus.RIDER_CANCELLED;
   ride.cancellation = { cancelledBy, reason, cancelledAt: new Date() };
   await ride.save();
+
+  // Notify the other party if assigned, or broadcast cancellation
+  import('../sockets/tracking.socket').then(({ ioInstance }) => {
+    if (ioInstance) {
+      if (ride.rider) {
+        ioInstance.to(`rider:${ride.rider}`).emit('ride_cancelled', { rideId: ride._id, cancelledBy, reason });
+        ioInstance.to(`passenger:${ride.passenger}`).emit('ride_cancelled', { rideId: ride._id, cancelledBy, reason });
+      } else {
+        // If no rider accepted yet, broadcast to the rider_room so nearby riders can remove the request
+        ioInstance.to('rider_room').emit('ride_cancelled', { rideId: ride._id, cancelledBy, reason });
+      }
+    }
+  });
+
   res.status(200).json(new ApiResponse(200, 'Ride cancelled', ride));
+});
+
+/**
+ * @route   POST /api/v1/ride/:id/sos
+ * @desc    Trigger SOS for an active ride
+ * @access  Protected
+ */
+export const triggerSOS = asyncHandler(async (req: Request, res: Response) => {
+  const ride = await Ride.findById(req.params.id);
+  if (!ride) throw new ApiError(404, 'Ride not found');
+
+  const triggeredBy = ride.passenger.toString() === req.user?._id ? 'Passenger' : 'Rider';
+
+  // Mark ride with SOS alert (push to aiSafetyAlerts or similar, or just status)
+  ride.aiSafetyAlerts.push({
+    type: 'sos_triggered',
+    timestamp: new Date(),
+    resolved: false
+  });
+  await ride.save();
+
+  // Socket notification to admin
+  import('../sockets/tracking.socket').then(({ ioInstance }) => {
+    if (ioInstance) {
+      ioInstance.to('admin_room').emit('admin_sos_alert', {
+        rideId: ride._id,
+        triggeredBy,
+        userId: req.user?._id,
+        timestamp: new Date(),
+      });
+    }
+  });
+
+  // You can also add FCM to admin or SMS/WhatsApp to emergency contacts here
+  
+  res.status(200).json(new ApiResponse(200, 'SOS Triggered Successfully', ride));
 });
 
 /**
@@ -408,7 +504,9 @@ export const rateRide = asyncHandler(async (req: Request, res: Response) => {
 
   const ride = await Ride.findById(req.params.id);
   if (!ride) throw new ApiError(404, 'Ride not found');
-  if (ride.status !== RideStatus.COMPLETED) throw new ApiError(400, 'Only completed rides can be rated');
+  if (ride.status !== RideStatus.COMPLETED && ride.status !== RideStatus.PAYMENT_COMPLETED) {
+    throw new ApiError(400, 'Only completed rides can be rated');
+  }
 
   const isPassenger = ride.passenger.toString() === req.user?._id;
 
@@ -459,16 +557,14 @@ export const getRideHistory = asyncHandler(async (req: Request, res: Response) =
   const limit = parseInt(req.query.limit as string) || 10;
   const skip = (page - 1) * limit;
 
-  const query =
-    req.user?.role === UserRole.RIDER
-      ? { rider: req.user?._id }
-      : { passenger: req.user?._id };
+  const query = { $or: [{ rider: req.user?._id }, { passenger: req.user?._id }] };
 
   const [rides, total] = await Promise.all([
     Ride.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit)
       .populate('passenger', 'name').populate('rider', 'name'),
     Ride.countDocuments(query),
   ]);
+  console.log(rides, total);
 
   res.status(200).json(new ApiResponse(200, 'Ride history fetched', {
     rides, page, limit, total, totalPages: Math.ceil(total / limit),

@@ -3,7 +3,7 @@ import { protect } from '../middlewares/auth.middleware';
 import { validate } from '../middlewares/validate.middleware';
 import {
   estimateFare, requestRide, getNearbyRiders,
-  acceptRide, rejectRide, riderArrived, startRide, completeRide, cancelRide,
+  acceptRide, rejectRide, riderArrived, startRide, completeRide, cancelRide, confirmPayment, triggerSOS,
   getRideDetails, getRideHistory, rateRide,
 } from '../controllers/ride.controller';
 import { rideEstimateSchema, requestRideSchema, cancelRideSchema } from '../validations/ride.validation';
@@ -49,6 +49,7 @@ router.put('/:id/start',
   } */
 startRide);
 router.put('/:id/complete', completeRide);
+router.put('/:id/confirm-payment', confirmPayment);
 router.put('/:id/cancel', validate(cancelRideSchema), 
   /*  #swagger.parameters['body'] = {
         in: 'body',
@@ -57,5 +58,6 @@ router.put('/:id/cancel', validate(cancelRideSchema),
   } */
 cancelRide);
 router.put('/:id/rate', rateRide);
+router.post('/:id/sos', triggerSOS);
 
 export default router;

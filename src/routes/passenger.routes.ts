@@ -12,7 +12,7 @@ import { updateChildSchema, disputeSchema, updatePassengerProfileSchema } from '
 
 const router = Router();
 
-router.use(protect, authorize(UserRole.PASSENGER));
+router.use(protect, authorize(UserRole.PASSENGER, UserRole.RIDER));
 
 router.get('/profile', getProfile);
 router.put('/profile', validate(updatePassengerProfileSchema), updateProfile);

@@ -5,7 +5,8 @@ import { ApiError } from '../utils/ApiError';
 import { User } from '../models/User';
 import { RiderProfile } from '../models/RiderProfile';
 import { WalletTransaction } from '../models/WalletTransaction';
-import { KYCStatus, DocumentType, UserRole } from '../config/constants';
+import { Ride } from '../models/Ride';
+import { KYCStatus, DocumentType, UserRole, RideStatus } from '../config/constants';
 
 /**
  * @route   GET /api/v1/rider/profile
@@ -191,8 +192,46 @@ export const getEarnings = asyncHandler(async (req: Request, res: Response) => {
   const recentTransactions = await WalletTransaction.find({ user: req.user?._id })
     .sort({ createdAt: -1 }).limit(20);
 
+  // Calculate daily and monthly earnings from Rides
+  const now = new Date();
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const [dailyResult, monthlyResult] = await Promise.all([
+    Ride.aggregate([
+      { 
+        $match: { 
+          rider: req.user?._id, 
+          status: { $in: [RideStatus.COMPLETED, RideStatus.PAYMENT_COMPLETED] },
+          rideEndedAt: { $gte: startOfDay }
+        } 
+      },
+      { $group: { _id: null, total: { $sum: "$finalFare" } } }
+    ]),
+    Ride.aggregate([
+      { 
+        $match: { 
+          rider: req.user?._id, 
+          status: { $in: [RideStatus.COMPLETED, RideStatus.PAYMENT_COMPLETED] },
+          rideEndedAt: { $gte: startOfMonth }
+        } 
+      },
+      { $group: { _id: null, total: { $sum: "$finalFare" } } }
+    ])
+  ]);
+
+  const todayEarnings = dailyResult[0]?.total || 0;
+  const monthlyEarnings = monthlyResult[0]?.total || 0;
+
   res.status(200).json(new ApiResponse(200, 'Earnings fetched', {
-    summary: { totalEarnings: profile.totalEarnings, walletBalance: profile.walletBalance, totalRides: profile.totalRides, rating: profile.rating },
+    summary: { 
+      totalEarnings: profile.totalEarnings, 
+      walletBalance: profile.walletBalance, 
+      totalRides: profile.totalRides, 
+      rating: profile.rating,
+      todayEarnings,
+      monthlyEarnings
+    },
     recentTransactions,
   }));
 });
