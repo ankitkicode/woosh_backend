@@ -53,12 +53,12 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 app.use(helmet());
 
 // 2. Rate limiting (Max 100 requests per 10 mins per IP)
-const limiter = rateLimit({
-  windowMs: 10 * 60 * 1000,
-  max: 100,
-  message: 'Too many requests from this IP, please try again after 10 minutes'
-});
-app.use('/api', limiter);
+// const limiter = rateLimit({
+//   windowMs: 10 * 60 * 1000,
+//   max: 100,
+//   message: 'Too many requests from this IP, please try again after 10 minutes'
+// });
+// app.use('/api', limiter);
 
 app.use(cors({ origin: process.env.CLIENT_URLS?.split(',') || '*', credentials: true }));
 app.use(express.json({ limit: '10mb' }));
