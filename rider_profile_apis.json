@@ -1,0 +1,157 @@
+{
+	"info": {
+		"name": "Woosh Rider Profile APIs",
+		"description": "APIs for getting and updating Rider Profile, Documents, and Profile Image.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "1. Get Rider Profile (All Details)",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{accessToken}}",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{baseUrl}}/rider/profile",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"rider",
+						"profile"
+					]
+				},
+				"description": "Fetches User details, Vehicle details, KYC status, and all uploaded Documents in one call."
+			},
+			"response": []
+		},
+		{
+			"name": "2. Update Rider Profile (Edit Info)",
+			"request": {
+				"method": "PUT",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{accessToken}}",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"name\": \"Test Rider\",\n    \"email\": \"rider@woosh.com\",\n    \"gender\": \"female\",\n    \"dateOfBirth\": \"1995-08-15\",\n    \"city\": \"Indore\",\n    \"vehicleNumber\": \"MP09AB1234\",\n    \"vehicleModel\": \"Honda Activa 6G\",\n    \"vehicleColor\": \"Black\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{baseUrl}}/rider/profile",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"rider",
+						"profile"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "3. Upload Profile Image",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{accessToken}}",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "image",
+							"type": "file",
+							"src": []
+						}
+					]
+				},
+				"url": {
+					"raw": "{{baseUrl}}/rider/profile-image",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"rider",
+						"profile-image"
+					]
+				},
+				"description": "Upload a single profile picture for the rider."
+			},
+			"response": []
+		},
+		{
+			"name": "4. Upload/Update KYC Documents",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{accessToken}}",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "vehicleNumber",
+							"value": "MP09AB1234",
+							"type": "text"
+						},
+						{
+							"key": "aadhaar",
+							"type": "file",
+							"src": []
+						},
+						{
+							"key": "driving_license",
+							"type": "file",
+							"src": []
+						},
+						{
+							"key": "rc_book",
+							"type": "file",
+							"src": []
+						}
+					]
+				},
+				"url": {
+					"raw": "{{baseUrl}}/rider/kyc",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"rider",
+						"kyc"
+					]
+				},
+				"description": "Submit initial KYC documents OR re-upload a specific rejected document."
+			},
+			"response": []
+		}
+	]
+}

@@ -5,7 +5,7 @@ import { upload } from '../middlewares/upload.middleware';
 import { validate } from '../middlewares/validate.middleware';
 import {
   getRiderProfile, updateRiderProfile, submitKYC,
-  getKYCStatus, toggleOnlineStatus, getEarnings, updateSafetyChecklist
+  getKYCStatus, toggleOnlineStatus, getEarnings, updateSafetyChecklist, uploadProfileImage
 } from '../controllers/rider.controller';
 import { updateRiderProfileSchema } from '../validations/rider.validation';
 
@@ -15,6 +15,7 @@ router.use(protect);
 
 router.get('/profile', getRiderProfile);
 router.put('/profile', validate(updateRiderProfileSchema), updateRiderProfile);
+router.post('/profile-image', upload.single('image'), uploadProfileImage);
 router.post('/kyc', upload.fields([
   { name: 'aadhaar', maxCount: 1 },
   { name: 'driving_license', maxCount: 1 },
@@ -30,5 +31,9 @@ router.get('/kyc/status', getKYCStatus);
 router.put('/safety-checklist', updateSafetyChecklist);
 router.put('/status', kycGate, toggleOnlineStatus);
 router.get('/earnings', getEarnings);
+
+
+
+
 
 export default router;

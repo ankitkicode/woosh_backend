@@ -2,8 +2,13 @@ import { z } from 'zod';
 
 export const updateRiderProfileSchema = z.object({
   name: z.string().trim().min(2).max(50).optional(),
+  email: z.string().email().optional().or(z.literal('')),
+  gender: z.literal('female').optional(),
+  dateOfBirth: z.string().trim().optional(),
+  city: z.string().trim().optional(),
   vehicleNumber: z.string().trim().toUpperCase().min(4).max(15).optional(),
   vehicleModel: z.string().trim().max(50).optional(),
+  vehicleColor: z.string().trim().max(30).optional(),
 });
 
 export const kycSubmitSchema = z.object({

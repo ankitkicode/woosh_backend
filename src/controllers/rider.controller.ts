@@ -26,14 +26,40 @@ export const getRiderProfile = asyncHandler(async (req: Request, res: Response) 
  * @access  Protected (rider)
  */
 export const updateRiderProfile = asyncHandler(async (req: Request, res: Response) => {
-  const { name, vehicleNumber, vehicleModel } = req.body;
-  const user = await User.findByIdAndUpdate(req.user?._id, { name }, { new: true }).select('-refreshToken');
+  const { name, email, gender, dateOfBirth, city, vehicleNumber, vehicleModel, vehicleColor } = req.body;
+  
+  const user = await User.findByIdAndUpdate(
+    req.user?._id, 
+    { name, email, gender, dateOfBirth, city }, 
+    { new: true, runValidators: true }
+  ).select('-refreshToken');
+
   const riderProfile = await RiderProfile.findOneAndUpdate(
     { user: req.user?._id },
-    { vehicleNumber, vehicleModel },
-    { new: true, upsert: true }
+    { vehicleNumber, vehicleModel, vehicleColor },
+    { new: true, upsert: true, runValidators: true }
   );
   res.status(200).json(new ApiResponse(200, 'Profile updated', { user, riderProfile }));
+});
+
+/**
+ * @route   POST /api/v1/rider/profile-image
+ * @desc    Upload or update rider profile image
+ * @access  Protected (rider)
+ */
+export const uploadProfileImage = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.file) {
+    throw new ApiError(400, 'Please upload an image file');
+  }
+
+  const profileImage = `/uploads/${req.file.filename}`;
+  const riderProfile = await RiderProfile.findOneAndUpdate(
+    { user: req.user?._id },
+    { profileImage },
+    { new: true, upsert: true }
+  );
+
+  res.status(200).json(new ApiResponse(200, 'Profile image updated successfully', { profileImage: riderProfile.profileImage }));
 });
 
 /**

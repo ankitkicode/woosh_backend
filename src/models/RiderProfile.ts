@@ -27,6 +27,7 @@ export interface IRiderProfile extends Document {
   profileImage?: string;
   vehicleNumber: string;
   vehicleModel?: string;
+  vehicleColor?: string;
   kycStatus: KYCStatus;
   kycRejectionReason?: string;
   documents: IDocument[];
@@ -49,6 +50,7 @@ const riderProfileSchema = new Schema<IRiderProfile>(
     profileImage: { type: String },
     vehicleNumber: { type: String, required: true, trim: true, uppercase: true },
     vehicleModel: { type: String, trim: true },
+    vehicleColor: { type: String, trim: true },
     kycStatus: { type: String, enum: Object.values(KYCStatus), default: KYCStatus.PENDING },
     kycRejectionReason: { type: String },
     documents: [
