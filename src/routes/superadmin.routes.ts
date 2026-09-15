@@ -10,8 +10,6 @@ router.use(protect, authorize(UserRole.SUPER_ADMIN));
 
 router.post('/cities', addCity);
 router.get('/cities', getAllCities);
-router.put('/pricing/:city', updatePricing);
-router.get('/pricing/:city', getPricing);
 router.get('/stats', getPlatformStats);
 router.get('/config', getSystemConfig);
 router.put('/config', updateSystemConfig);

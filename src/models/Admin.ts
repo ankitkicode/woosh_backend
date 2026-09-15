@@ -6,8 +6,11 @@ export interface IAdmin extends Document {
   passwordHash: string;
   name: string;
   role: 'super_admin' | 'admin';
+  phone?: string;
+  avatar?: string;
   isActive: boolean;
   lastLogin?: Date;
+  assignedCities?: mongoose.Types.ObjectId[];
   comparePassword(password: string): Promise<boolean>;
 }
 
@@ -17,8 +20,11 @@ const adminSchema = new Schema<IAdmin>(
     passwordHash: { type: String, required: true },
     name: { type: String, required: true, trim: true },
     role: { type: String, enum: ['super_admin', 'admin'], default: 'admin' },
+    phone: { type: String, trim: true },
+    avatar: { type: String },
     isActive: { type: Boolean, default: true },
     lastLogin: { type: Date },
+    assignedCities: [{ type: Schema.Types.ObjectId, ref: 'City' }],
   },
   { timestamps: true }
 );

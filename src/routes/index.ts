@@ -8,7 +8,12 @@ import paymentRoutes from './payment.routes';
 import adminRoutes from './admin.routes';
 import superAdminRoutes from './superadmin.routes';
 
+import { getCities } from '../controllers/city.controller';
+
 const router = Router();
+
+// Public Routes
+router.get('/cities', getCities);
 
 router.use('/auth', authRoutes);
 router.use('/passenger', passengerRoutes);

@@ -11,9 +11,8 @@ import {
 } from '../controllers/admin.controller';
 import { processWeeklyPayouts } from '../controllers/payout.controller';
 
-import { getCities, createCity, updateCity, toggleCityStatus } from '../controllers/city.controller';
+import { getCities, createCity, updateCity, toggleCityStatus, getCityById, deleteCity } from '../controllers/city.controller';
 import { getGateways, createGateway, updateGateway, toggleGatewayStatus } from '../controllers/gateway.controller';
-import { getTemplates, createTemplate, updateTemplate, toggleTemplateStatus } from '../controllers/template.controller';
 import { getSettings, updateSettings } from '../controllers/settings.controller';
 
 const router = Router();
@@ -47,22 +46,18 @@ router.post('/payouts/process-weekly', processWeeklyPayouts);
 const superAdminOnly = authorize(UserRole.SUPER_ADMIN);
 
 // Cities
-router.get('/cities', superAdminOnly, getCities);
+router.get('/cities',  getCities);
 router.post('/cities', superAdminOnly, createCity);
+router.get('/cities/:id', superAdminOnly, getCityById);
 router.put('/cities/:id', superAdminOnly, updateCity);
 router.put('/cities/:id/toggle', superAdminOnly, toggleCityStatus);
+router.delete('/cities/:id', superAdminOnly, deleteCity);
 
 // Gateways
 router.get('/gateways', superAdminOnly, getGateways);
 router.post('/gateways', superAdminOnly, createGateway);
 router.put('/gateways/:id', superAdminOnly, updateGateway);
 router.put('/gateways/:id/toggle', superAdminOnly, toggleGatewayStatus);
-
-// Templates
-router.get('/templates', superAdminOnly, getTemplates);
-router.post('/templates', superAdminOnly, createTemplate);
-router.put('/templates/:id', superAdminOnly, updateTemplate);
-router.put('/templates/:id/toggle', superAdminOnly, toggleTemplateStatus);
 
 // Settings
 router.get('/settings', superAdminOnly, getSettings);

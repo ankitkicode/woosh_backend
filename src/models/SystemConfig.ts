@@ -8,21 +8,12 @@ export interface IGatewayConfig {
   smsApiSecret?: string;
 }
 
-export interface IThemeConfig {
-  primaryColor?: string;
-  secondaryColor?: string;
-  otpMessageTemplate?: string;
-  rideArrivedTemplate?: string;
-  sosAlertTemplate?: string;
-}
-
 export interface ISystemConfig extends Document {
   platformCommissionRate: number;
   taxRate: number;
   maxSurgeLimit: number;
   defaultCurrency: string;
   gateways: IGatewayConfig;
-  theme: IThemeConfig;
   updatedBy?: mongoose.Types.ObjectId;
   updatedAt: Date;
 }
@@ -39,13 +30,6 @@ const systemConfigSchema = new Schema<ISystemConfig>(
       smsProvider: { type: String, default: 'Twilio' },
       smsApiKey: { type: String },
       smsApiSecret: { type: String },
-    },
-    theme: {
-      primaryColor: { type: String, default: '#E83A59' },
-      secondaryColor: { type: String, default: '#3B1E54' },
-      otpMessageTemplate: { type: String, default: '{OTP} is your Woosh verification code. Do not share it with anyone.' },
-      rideArrivedTemplate: { type: String, default: 'Your Woosh rider {RiderName} has arrived at the pickup location. OTP: {RideOTP}' },
-      sosAlertTemplate: { type: String, default: '🚨 EMERGENCY! {UserName} has pressed SOS at {Location}. QRT Dispatch Initiated.' },
     },
     updatedBy: { type: Schema.Types.ObjectId, ref: 'User' },
   },

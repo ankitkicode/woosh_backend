@@ -95,14 +95,13 @@ export const getSystemConfig = asyncHandler(async (req: Request, res: Response) 
  * @access  Protected (super_admin)
  */
 export const updateSystemConfig = asyncHandler(async (req: Request, res: Response) => {
-  const { gateways, theme } = req.body;
+  const { gateways } = req.body;
   let config = await SystemConfig.findOne();
   if (!config) {
     config = new SystemConfig();
   }
   
   if (gateways) config.gateways = { ...config.gateways, ...gateways };
-  if (theme) config.theme = { ...config.theme, ...theme };
   
   // @ts-ignore - req.user is set by auth middleware
   config.updatedBy = req.user._id;
