@@ -69,7 +69,7 @@ export const getPlatformStats = asyncHandler(async (req: Request, res: Response)
     Ride.countDocuments(),
   ]);
   const revenueResult = await Ride.aggregate([
-    { $match: { status: 'completed', finalFare: { $exists: true } } },
+    { $match: { status: { $in: ['completed', 'payment_completed'] }, finalFare: { $exists: true, $ne: null } } },
     { $group: { _id: null, totalRevenue: { $sum: '$finalFare' } } },
   ]);
   const totalRevenue = revenueResult[0]?.totalRevenue || 0;

@@ -2,7 +2,16 @@ import multer from 'multer';
 import path from 'path';
 import { ApiError } from '../utils/ApiError';
 
-const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/jpg', 'application/pdf'];
+const ALLOWED_TYPES = [
+  'image/jpeg', 
+  'image/png', 
+  'image/jpg', 
+  'application/pdf',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+  'image/svg+xml'
+];
 const MAX_FILE_SIZE_MB = 5;
 
 const storage = multer.diskStorage({

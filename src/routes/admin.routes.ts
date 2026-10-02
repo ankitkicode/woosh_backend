@@ -5,11 +5,16 @@ import { UserRole } from '../config/constants';
 import {
   getDashboard, getPendingRiders, approveRider, rejectRider, updateDocumentStatus,
   getAllRiders, getRiderById, deleteRider,
-  getActiveRides, getDisputes, resolveDispute,
+  getActiveRides, getAllRides, getRideById,
+  getDisputes, resolveDispute,
   getUsers, getSOSAlerts, getInsuranceClaims,
-  banUser, unbanUser, resolveSOSAlert, adminLogin
+  banUser, unbanUser, resolveSOSAlert, markSOSFalseAlarm,
+  updateInsuranceClaimStatus, getPassengerById, adminLogin,
+  listPayoutRequests,
+  updatePayoutRequest,
+  getRiderWalletHistory,
+  fetchAnalytics
 } from '../controllers/admin.controller';
-import { processWeeklyPayouts } from '../controllers/payout.controller';
 
 import { getCities, createCity, updateCity, toggleCityStatus, getCityById, deleteCity } from '../controllers/city.controller';
 import { getGateways, createGateway, updateGateway, toggleGatewayStatus } from '../controllers/gateway.controller';
@@ -23,7 +28,16 @@ router.post('/login', adminLogin);
 // Protected Routes
 router.use(protect, authorize(UserRole.ADMIN, UserRole.SUPER_ADMIN));
 
+router.get('/analytics', fetchAnalytics);
+
 router.get('/dashboard', getDashboard);
+
+// Rides
+router.get('/rides', getAllRides);
+router.get('/rides/active', getActiveRides);
+router.get('/rides/:id', getRideById);
+
+// Riders
 router.get('/riders', getAllRiders);
 router.get('/riders/pending', getPendingRiders);
 router.get('/riders/:id', getRiderById);
@@ -31,16 +45,28 @@ router.delete('/riders/:id', deleteRider);
 router.put('/riders/:id/approve', approveRider);
 router.put('/riders/:id/reject', rejectRider);
 router.put('/riders/:id/documents/:docType/status', updateDocumentStatus);
-router.get('/rides/active', getActiveRides);
+
+// Disputes
 router.get('/disputes', getDisputes);
 router.put('/disputes/:id/resolve', resolveDispute);
+
+// Users & Passengers
 router.get('/users', getUsers);
-router.get('/sos', getSOSAlerts);
-router.put('/sos/:id/resolve', resolveSOSAlert);
-router.get('/insurance', getInsuranceClaims);
+router.get('/passengers/:id', getPassengerById);
 router.put('/users/:id/ban', banUser);
 router.put('/users/:id/unban', unbanUser);
-router.post('/payouts/process-weekly', processWeeklyPayouts);
+
+// SOS
+router.get('/sos', getSOSAlerts);
+router.put('/sos/:id/resolve', resolveSOSAlert);
+router.put('/sos/:id/false-alarm', markSOSFalseAlarm);
+
+// Insurance
+router.get('/insurance', getInsuranceClaims);
+router.put('/insurance/:id/status', updateInsuranceClaimStatus);
+
+// Payouts
+
 
 // SUPER_ADMIN ONLY ROUTES
 const superAdminOnly = authorize(UserRole.SUPER_ADMIN);
@@ -62,5 +88,11 @@ router.put('/gateways/:id/toggle', superAdminOnly, toggleGatewayStatus);
 // Settings
 router.get('/settings', superAdminOnly, getSettings);
 router.put('/settings', superAdminOnly, updateSettings);
+// ==========================================
+// PAYOUTS & WALLET
+// ==========================================
+router.get('/payouts', listPayoutRequests);
+router.put('/payouts/:id', updatePayoutRequest);
+router.get('/riders/:id/wallet-history', getRiderWalletHistory);
 
 export default router;

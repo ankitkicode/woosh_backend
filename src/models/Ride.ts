@@ -47,9 +47,14 @@ export interface IRide extends Document {
   distanceKm?: number;
   durationMinutes?: number;
   estimatedFare?: number;
+  waitingCharges?: number;
   finalFare?: number;
+  platformCommission?: number;
+  riderEarnings?: number;
   paymentMethod: PaymentMethod;
   paymentStatus: PaymentStatus;
+  razorpayOrderId?: string;
+  razorpayPaymentId?: string;
   isSurge: boolean;
   surgeMultiplier: number;
   cancellation?: ICancellation;
@@ -58,7 +63,6 @@ export interface IRide extends Document {
   videoRecordingConsent: boolean;
   aiSafetyAlerts: IAiSafetyAlert[];
   insuranceDetails?: IInsuranceDetails;
-  waitingCharges: number;
   sosTriggeredAt?: Date;
   riderArrivedAt?: Date;
   rideStartedAt?: Date;
@@ -92,8 +96,12 @@ const rideSchema = new Schema<IRide>(
     durationMinutes: { type: Number },
     estimatedFare: { type: Number },
     finalFare: { type: Number },
+    platformCommission: { type: Number },
+    riderEarnings: { type: Number },
     paymentMethod: { type: String, enum: Object.values(PaymentMethod), default: PaymentMethod.CASH },
     paymentStatus: { type: String, enum: Object.values(PaymentStatus), default: PaymentStatus.PENDING },
+    razorpayOrderId: { type: String },
+    razorpayPaymentId: { type: String },
     isSurge: { type: Boolean, default: false },
     surgeMultiplier: { type: Number, default: 1.0 },
     cancellation: {

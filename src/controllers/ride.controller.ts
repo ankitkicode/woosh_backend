@@ -5,12 +5,16 @@ import { ApiResponse } from '../utils/ApiResponse';
 import { ApiError } from '../utils/ApiError';
 import { Ride } from '../models/Ride';
 import { RiderProfile } from '../models/RiderProfile';
+import { User } from '../models/User';
 import { PricingRule } from '../models/PricingRule';
 import { calculateFare } from '../utils/fareCalculator';
 import { mapsService } from '../services/maps.service';
-import { fcmService } from '../services/fcm.service';
+
 import { whatsappService } from '../services/whatsapp.service';
-import { RideStatus, CancellationBy, UserRole, RIDER_SEARCH_RADIUS_KM, PaymentStatus } from '../config/constants';
+import { DisputeCategory, PaymentMethod, PaymentStatus, RideStatus, UserRole, WalletTransactionType, CancellationBy, RIDER_SEARCH_RADIUS_KM } from '../config/constants';
+import { WalletTransaction } from '../models/WalletTransaction';
+import { SystemConfig } from '../models/SystemConfig';
+import { paymentService } from '../services/payment.service';
 
 const generateRideOTP = (): string => String(crypto.randomInt(1000, 9999));
 
@@ -95,21 +99,6 @@ export const requestRide = asyncHandler(async (req: Request, res: Response) => {
       initialAssignedRider = riderUser._id;
       assignmentExpiresAt = new Date(Date.now() + 30000); // 30 seconds timeout
       notifiedRiders.push(riderUser._id);
-
-      // Notify the FIRST nearest rider
-      if (riderUser.sessions) {
-        const tokens = riderUser.sessions
-          .map((s: any) => s.fcmToken)
-          .filter((t: string | undefined): t is string => !!t);
-        if (tokens.length > 0) {
-          await fcmService.sendMulticast(
-            tokens,
-            '🚗 New Ride Request!',
-            `Pickup: ${pickup.address || 'Nearby'} → ${drop.address || 'Destination'} | ₹${fare.totalFare}`,
-            { rideId: 'PENDING_CREATION', type: 'new_ride_request' }
-          );
-        }
-      }
     }
   } catch (err) {
     console.error('[FCM] Error finding riders:', err);
@@ -134,18 +123,20 @@ export const requestRide = asyncHandler(async (req: Request, res: Response) => {
   });
 
   // Since we couldn't send the real ride ID earlier, let's notify the assigned rider properly now
-  if (initialAssignedRider) {
-      await fcmService.sendToUser(
-          initialAssignedRider.toString(),
-          '🚗 New Ride Request!',
-          `Pickup: ${pickup.address || 'Nearby'} → ${drop.address || 'Destination'} | ₹${fare.totalFare}`,
-          { rideId: ride._id.toString(), type: 'new_ride_request' }
-      );
-      
+  // if (initialAssignedRider) {
+  //   const assignedRiderDoc = await User.findById(initialAssignedRider);
+  //   if (assignedRiderDoc && assignedRiderDoc.phoneNumber) {
+  //     await whatsappService.sendNewRideRequest(
+  //       assignedRiderDoc.phoneNumber,
+  //       pickup.address || 'Nearby',
+  //       drop.address || 'Destination'
+  //     );
+  //   }
+  // }    
       // Also emit via socket.io for real-time app update
       try {
         const { ioInstance } = await import('../sockets/tracking.socket');
-        if (ioInstance) {
+        if (ioInstance && initialAssignedRider) {
           console.log(`[Socket] Emitting new_ride_request to rider:${initialAssignedRider.toString()}`);
           ioInstance.to(`rider:${initialAssignedRider.toString()}`).emit('new_ride_request', {
             rideId: ride._id,
@@ -162,7 +153,6 @@ export const requestRide = asyncHandler(async (req: Request, res: Response) => {
       } catch (err) {
         console.error('[Socket] Error emitting new_ride_request:', err);
       }
-  }
 
 
   res.status(201).json(new ApiResponse(201, 'Ride requested. Searching for riders...', ride));
@@ -219,17 +209,16 @@ export const acceptRide = asyncHandler(async (req: Request, res: Response) => {
   try {
     const passengerUser = ride.passenger as any;
     
-    // Send WhatsApp OTP since the ride is now confirmed
-    if (passengerUser && passengerUser.phoneNumber) {
-      await whatsappService.sendOTP(passengerUser.phoneNumber, ride.otp);
-    }
+    // if (passengerUser && passengerUser.phoneNumber) {
+    //   await whatsappService.sendOTP(passengerUser.phoneNumber, ride.otp);
 
-    await fcmService.sendToUser(
-      passengerUser._id.toString(),
-      '🎉 Rider Assigned!',
-      `Your Woosh rider is on the way to pick you up. OTP: ${ride.otp}`,
-      { rideId: ride._id.toString(), type: 'ride_accepted' }
-    );
+    //   const riderDoc = await User.findById(req.user?._id);
+    //   await whatsappService.sendRideAccepted(
+    //     passengerUser.phoneNumber,
+    //     riderDoc?.name || 'Your Rider',
+    //     'Woosh Vehicle'
+    //   );
+    // } 
     
     // Emit via socket
     import('../sockets/tracking.socket').then(({ ioInstance }) => {
@@ -271,23 +260,21 @@ export const rejectRide = asyncHandler(async (req: Request, res: Response) => {
  * @access  Protected (rider)
  */
 export const riderArrived = asyncHandler(async (req: Request, res: Response) => {
-  const ride = await Ride.findOne({ _id: req.params.id, rider: req.user?._id, status: RideStatus.ACCEPTED });
+  const ride = await Ride.findOne({ _id: req.params.id, rider: req.user?._id, status: RideStatus.ACCEPTED }).populate('passenger');
   if (!ride) throw new ApiError(404, 'Ride not found');
   ride.status = RideStatus.RIDER_ARRIVED;
   ride.riderArrivedAt = new Date();
   await ride.save();
 
   // Notify passenger: rider has arrived + remind OTP
-  try {
-    await fcmService.sendToUser(
-      ride.passenger.toString(),
-      '📍 Rider Has Arrived!',
-      `Your rider is at the pickup location. Share OTP: ${ride.otp} to start the ride.`,
-      { rideId: ride._id.toString(), rideOtp: ride.otp, type: 'rider_arrived' }
-    );
-  } catch (err) {
-    console.error('[FCM] Error notifying passenger of arrival:', err);
-  }
+  // try {
+  //   const passengerUser = ride.passenger as any;
+  //   if (passengerUser && passengerUser.phoneNumber) {
+  //     await whatsappService.sendRiderArrived(passengerUser.phoneNumber, ride.otp);
+  //   }
+  // } catch (err) {
+  //   console.error('[WhatsApp] Error notifying passenger of arrival:', err);
+  // }
 
   // Socket notification
   import('../sockets/tracking.socket').then(({ ioInstance }) => {
@@ -309,18 +296,23 @@ export const riderArrived = asyncHandler(async (req: Request, res: Response) => 
  */
 export const startRide = asyncHandler(async (req: Request, res: Response) => {
   const { otp } = req.body;
-  const ride = await Ride.findOne({ _id: req.params.id, rider: req.user?._id, status: RideStatus.RIDER_ARRIVED });
+  const ride = await Ride.findOne({ _id: req.params.id, rider: req.user?._id, status: RideStatus.RIDER_ARRIVED }).populate('passenger');
   if (!ride) throw new ApiError(404, 'Ride not found or not in correct status');
   if (ride.otp !== otp) throw new ApiError(400, 'Incorrect OTP. Ride cannot be started.');
   ride.status = RideStatus.STARTED;
   ride.rideStartedAt = new Date();
   await ride.save();
 
-  // Send WhatsApp Live Tracking Link to Passenger
-  await whatsappService.sendRideTrackingLink(
-    req.user?.phoneNumber || '', 
-    `https://woosh.com/track/${ride._id}`
-  );
+  // const passengerUser = ride.passenger as any;
+  // if (passengerUser && passengerUser.phoneNumber) {
+  //   // Send WhatsApp Ride Started
+  //   await whatsappService.sendRideStarted(passengerUser.phoneNumber);
+  //   // Send WhatsApp Live Tracking Link to Passenger
+  //   await whatsappService.sendRideTrackingLink(
+  //     passengerUser.phoneNumber, 
+  //     `https://woosh.com/track/${ride._id}`
+  //   );
+  // }
 
   // Socket notification
   import('../sockets/tracking.socket').then(({ ioInstance }) => {
@@ -355,29 +347,42 @@ export const completeRide = asyncHandler(async (req: Request, res: Response) => 
 
   ride.finalFare = (ride.estimatedFare || 0) + (ride.waitingCharges || 0);
 
-  // Generate UPI deep link for QR code (Rapido-style)
-  const upiId = process.env.UPI_ID || 'woosh@upi';
-  const paymentQR = `upi://pay?pa=${upiId}&pn=Woosh&am=${ride.finalFare}&cu=INR&tn=Ride-${ride._id}`;
+  // Calculate Platform Commission
+  let platformCommissionRate = 20;
+  const config = await SystemConfig.findOne();
+  if (config && config.platformCommissionRate) {
+    platformCommissionRate = config.platformCommissionRate;
+  }
+  
+  const finalFare = ride.finalFare || 0;
+  const platformCommission = Number((finalFare * (platformCommissionRate / 100)).toFixed(2));
+  const riderEarnings = Number((finalFare - platformCommission).toFixed(2));
+  
+  ride.platformCommission = platformCommission;
+  ride.riderEarnings = riderEarnings;
 
-  // Update rider stats
-  await RiderProfile.findOneAndUpdate(
-    { user: ride.rider },
-    { $inc: { totalRides: 1, totalEarnings: ride.finalFare || 0 } }
-  );
+  // Generate Razorpay Order
+  let razorpayOrder = null;
+  if (ride.paymentMethod === PaymentMethod.UPI || ride.paymentMethod === PaymentMethod.CREDIT_CARD || ride.paymentMethod === PaymentMethod.DEBIT_CARD || ride.paymentMethod === PaymentMethod.NET_BANKING) {
+    try {
+      razorpayOrder = await paymentService.createOrder(finalFare, `Ride-${ride._id}`);
+      ride.razorpayOrderId = razorpayOrder.id;
+    } catch (err: any) {
+      console.error('[Razorpay] Order creation failed:', err.message);
+    }
+  }
 
   await ride.save();
 
   // Notify passenger that ride is complete
-  try {
-    await fcmService.sendToUser(
-      ride.passenger.toString(),
-      '✅ Ride Completed!',
-      `Total fare: ₹${ride.finalFare}. Thank you for riding with Woosh!`,
-      { rideId: ride._id.toString(), fare: String(ride.finalFare), type: 'ride_completed' }
-    );
-  } catch (err) {
-    console.error('[FCM] Error notifying passenger of completion:', err);
-  }
+  // try {
+  //   const passengerUser = ride.passenger as any;
+  //   if (passengerUser && passengerUser.phoneNumber) {
+  // await whatsappService.sendRideCompleted(passengerUser.phoneNumber, ride.finalFare);
+  //   }
+  // } catch (err) {
+  //   console.error('[FCM] Error notifying passenger of completion:', err);
+  // }
 
   // Socket notification
   import('../sockets/tracking.socket').then(({ ioInstance }) => {
@@ -385,6 +390,7 @@ export const completeRide = asyncHandler(async (req: Request, res: Response) => 
       ioInstance.to(`passenger:${ride.passenger.toString()}`).emit('ride_completed', {
         rideId: ride._id,
         fare: ride.finalFare,
+        razorpayOrderId: ride.razorpayOrderId
       });
     }
   });
@@ -396,10 +402,10 @@ export const completeRide = asyncHandler(async (req: Request, res: Response) => 
       baseFare: ride.estimatedFare,
       waitingCharges: ride.waitingCharges,
       paymentMethod: ride.paymentMethod,
-      upiPaymentLink: paymentQR,
-      message: ride.paymentMethod === 'cash'
-        ? 'Collect ₹' + ride.finalFare + ' cash from the passenger, or let them scan QR.'
-        : 'Show QR code to passenger or wait for online payment.',
+      razorpayOrderId: ride.razorpayOrderId,
+      message: ride.paymentMethod === PaymentMethod.CASH
+        ? `Collect ₹${ride.finalFare} cash from the passenger.`
+        : 'Passenger is paying online via Razorpay in their app.',
     }
   }));
 });
@@ -413,12 +419,92 @@ export const confirmPayment = asyncHandler(async (req: Request, res: Response) =
   const ride = await Ride.findOne({ _id: req.params.id, rider: req.user?._id, status: RideStatus.COMPLETED });
   if (!ride) throw new ApiError(404, 'Ride not found or not completed');
   
+  if (ride.paymentMethod !== PaymentMethod.CASH) {
+    throw new ApiError(400, 'This ride was not marked as CASH');
+  }
+
+  // Deduct platform commission from rider's wallet
+  const riderProfile = await RiderProfile.findOne({ user: ride.rider });
+  if (riderProfile) {
+    riderProfile.totalRides += 1;
+    riderProfile.totalEarnings += ride.riderEarnings || 0;
+    riderProfile.walletBalance -= (ride.platformCommission || 0);
+
+    await WalletTransaction.create({
+      user: ride.rider,
+      type: WalletTransactionType.DEBIT,
+      amount: ride.platformCommission || 0,
+      description: `Platform commission for Cash Ride (ID: ${ride._id})`,
+      referenceId: ride._id.toString(),
+      balanceAfter: riderProfile.walletBalance
+    });
+    
+    await riderProfile.save();
+  }
+
   // Set the payment status to paid
   ride.paymentStatus = PaymentStatus.PAID;
   ride.status = RideStatus.PAYMENT_COMPLETED;
   await ride.save();
 
   res.status(200).json(new ApiResponse(200, 'Payment confirmed', ride));
+});
+
+/**
+ * @route   POST /api/v1/ride/:id/verify-digital-payment
+ * @desc    Passenger verifies Razorpay payment
+ * @access  Protected (passenger)
+ */
+export const verifyDigitalPayment = asyncHandler(async (req: Request, res: Response) => {
+  const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+  
+  const ride = await Ride.findOne({ _id: req.params.id, passenger: req.user?._id, status: RideStatus.COMPLETED });
+  if (!ride) throw new ApiError(404, 'Ride not found or not completed');
+
+  if (ride.paymentMethod === PaymentMethod.CASH) {
+    throw new ApiError(400, 'This ride is not an online payment ride');
+  }
+
+  const isValid = paymentService.verifyPaymentSignature(razorpay_order_id, razorpay_payment_id, razorpay_signature);
+  if (!isValid) {
+    throw new ApiError(400, 'Invalid payment signature');
+  }
+
+  // Credit earnings to rider's wallet
+  const riderProfile = await RiderProfile.findOne({ user: ride.rider });
+  if (riderProfile) {
+    riderProfile.totalRides += 1;
+    riderProfile.totalEarnings += ride.riderEarnings || 0;
+    riderProfile.walletBalance += (ride.riderEarnings || 0);
+
+    await WalletTransaction.create({
+      user: ride.rider,
+      type: WalletTransactionType.PAYOUT,
+      amount: ride.riderEarnings || 0,
+      description: `Earnings for Digital Ride (Txn: ${razorpay_payment_id})`,
+      referenceId: ride._id.toString(),
+      balanceAfter: riderProfile.walletBalance
+    });
+    
+    await riderProfile.save();
+  }
+
+  ride.razorpayPaymentId = razorpay_payment_id;
+  ride.paymentStatus = PaymentStatus.PAID;
+  ride.status = RideStatus.PAYMENT_COMPLETED;
+  await ride.save();
+
+  // Notify Rider that payment was received
+  import('../sockets/tracking.socket').then(({ ioInstance }) => {
+    if (ioInstance && ride.rider) {
+      ioInstance.to(`rider:${ride.rider.toString()}`).emit('payment_received', {
+        rideId: ride._id,
+        amount: ride.finalFare,
+      });
+    }
+  });
+
+  res.status(200).json(new ApiResponse(200, 'Payment verified successfully', ride));
 });
 
 /**

@@ -7,6 +7,8 @@ import trackingRoutes from './tracking.routes';
 import paymentRoutes from './payment.routes';
 import adminRoutes from './admin.routes';
 import superAdminRoutes from './superadmin.routes';
+import contactRoutes from './contact.routes';
+import riderSupportRoutes from './riderSupport.routes';
 
 import { getCities } from '../controllers/city.controller';
 
@@ -23,5 +25,7 @@ router.use('/tracking', trackingRoutes);
 router.use('/payment', paymentRoutes);
 router.use('/admin', adminRoutes);
 router.use('/superadmin', superAdminRoutes);
+router.use('/contact', contactRoutes);
+router.use('/rider-support', riderSupportRoutes);
 
 export default router;

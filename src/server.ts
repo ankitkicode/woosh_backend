@@ -17,6 +17,7 @@ import { ApiError } from './utils/ApiError';
 import { ApiResponse } from './utils/ApiResponse';
 import { registerTrackingSocket } from './sockets/tracking.socket';
 import { startRideAssignmentCron } from './cron/rideAssignment.cron';
+import { startStaleRidesCron } from './cron/staleRides.cron';
 import routes from './routes/index';
 
 dotenv.config();
@@ -26,6 +27,7 @@ connectDB();
 
 // Start Background Jobs
 startRideAssignmentCron();
+startStaleRidesCron();
 
 const app = express();
 const server = http.createServer(app);
@@ -50,7 +52,9 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 // ─── Global Security Middlewares ─────────────────────────────────────
 // 1. Set security HTTP headers
-app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
 
 // 2. Rate limiting (Max 100 requests per 10 mins per IP)
 // const limiter = rateLimit({

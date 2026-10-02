@@ -1,6 +1,6 @@
 import { Ride } from '../models/Ride';
 import { RiderProfile } from '../models/RiderProfile';
-import { fcmService } from '../services/fcm.service';
+import { whatsappService } from '../services/whatsapp.service';
 import { RideStatus, RIDER_SEARCH_RADIUS_KM } from '../config/constants';
 
 /**
@@ -40,21 +40,14 @@ export const startRideAssignmentCron = () => {
           ride.notifiedRiders.push(riderUser._id);
           await ride.save();
 
-          // Notify the new assigned rider
-          if (riderUser.sessions) {
-            const tokens = riderUser.sessions
-              .map((s: any) => s.fcmToken)
-              .filter((t: string | undefined): t is string => !!t);
-            
-            if (tokens.length > 0) {
-              await fcmService.sendMulticast(
-                tokens,
-                '🚗 New Ride Request!',
-                `Pickup: ${ride.pickup.address || 'Nearby'} → ${ride.drop.address || 'Destination'} | ₹${ride.estimatedFare}`,
-                { rideId: ride._id.toString(), type: 'new_ride_request' }
-              );
-            }
-          }
+          // Notify the new assigned rider via WhatsApp
+          // if (riderUser.phoneNumber) {
+          //   await whatsappService.sendNewRideRequest(
+          //     riderUser.phoneNumber,
+          //     ride.pickup.address || 'Nearby',
+          //     ride.drop.address || 'Destination'
+          //   );
+          // }
 
           // Socket IO fallback
           import('../sockets/tracking.socket').then(({ ioInstance }) => {

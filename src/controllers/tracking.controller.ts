@@ -7,7 +7,7 @@ import { Ride } from '../models/Ride';
 import { SOSAlert } from '../models/SOSAlert';
 import { User } from '../models/User';
 import { smsService } from '../services/sms.service';
-import { fcmService } from '../services/fcm.service';
+
 
 /**
  * @route   PUT /api/v1/tracking/location

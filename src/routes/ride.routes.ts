@@ -1,10 +1,12 @@
 import { Router } from 'express';
 import { protect } from '../middlewares/auth.middleware';
+import { authorize } from '../middlewares/role.middleware';
+import { UserRole } from '../config/constants';
 import { validate } from '../middlewares/validate.middleware';
 import {
   estimateFare, requestRide, getNearbyRiders,
   acceptRide, rejectRide, riderArrived, startRide, completeRide, cancelRide, confirmPayment, triggerSOS,
-  getRideDetails, getRideHistory, rateRide,
+  getRideDetails, getRideHistory, rateRide, verifyDigitalPayment,
 } from '../controllers/ride.controller';
 import { rideEstimateSchema, requestRideSchema, cancelRideSchema } from '../validations/ride.validation';
 
@@ -48,8 +50,9 @@ router.put('/:id/start',
         schema: { otp: "123456" }
   } */
 startRide);
-router.put('/:id/complete', completeRide);
-router.put('/:id/confirm-payment', confirmPayment);
+router.put('/:id/complete', protect, authorize(UserRole.RIDER), completeRide);
+router.put('/:id/confirm-payment', protect, authorize(UserRole.RIDER), confirmPayment);
+router.post('/:id/verify-digital-payment', protect, authorize(UserRole.PASSENGER), verifyDigitalPayment);
 router.put('/:id/cancel', validate(cancelRideSchema), 
   /*  #swagger.parameters['body'] = {
         in: 'body',

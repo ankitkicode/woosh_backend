@@ -1,7 +1,9 @@
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import { asyncHandler } from '../utils/asyncHandler';
 import { ApiResponse } from '../utils/ApiResponse';
 import { ApiError } from '../utils/ApiError';
+import { getChartData, getTrendsData } from './dashboard.helper';
 import { User } from '../models/User';
 import { Ride } from '../models/Ride';
 import { Dispute } from '../models/Dispute';
@@ -9,9 +11,11 @@ import { RiderProfile } from '../models/RiderProfile';
 import { WalletTransaction } from '../models/WalletTransaction';
 import { SOSAlert } from '../models/SOSAlert';
 import { InsuranceClaim } from '../models/InsuranceClaim';
-import { KYCStatus, RideStatus, ComplaintStatus } from '../config/constants';
+import { KYCStatus, RideStatus, ComplaintStatus, PaymentStatus, WalletTransactionType } from '../config/constants';
+import { ChildProfile } from '../models/ChildProfile';
 import { Admin } from '../models/Admin';
 import { generateAccessToken, generateRefreshToken } from '../utils/generateToken';
+import { PayoutRequest } from '../models/PayoutRequest';
 
 /**
  * @route   POST /api/v1/admin/login
@@ -70,7 +74,7 @@ export const adminLogin = asyncHandler(async (req: Request, res: Response) => {
 export const getDashboard = asyncHandler(async (req: Request, res: Response) => {
   const [
     totalPassengers, totalRiders, totalRides, activeRides,
-    pendingKYC, openComplaints, completedRides,
+    pendingKYC, openComplaints, completedRides, chartData, trends, revenueResult
   ] = await Promise.all([
     User.countDocuments({ role: 'passenger' } as Record<string, unknown>),
     User.countDocuments({ role: 'rider' } as Record<string, unknown>),
@@ -79,10 +83,21 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
     RiderProfile.countDocuments({ kycStatus: KYCStatus.UNDER_REVIEW }),
     Dispute.countDocuments({ status: ComplaintStatus.OPEN }),
     Ride.countDocuments({ status: RideStatus.COMPLETED }),
+    getChartData(),
+    getTrendsData(),
+    Ride.aggregate([
+      { $match: { status: { $in: [RideStatus.COMPLETED, RideStatus.PAYMENT_COMPLETED] }, finalFare: { $exists: true, $ne: null } } },
+      { $group: { _id: null, totalRevenue: { $sum: '$finalFare' } } },
+    ])
   ]);
 
+  const totalRevenue = (revenueResult[0]?.totalRevenue || 0);
+
   res.status(200).json(new ApiResponse(200, 'Dashboard fetched', {
-    totalPassengers, totalRiders, totalRides, activeRides, pendingKYC, openComplaints, completedRides,
+    totalPassengers, totalRiders, totalRides, activeRides, pendingKYC, openComplaints, completedRides, totalRevenue,
+    revenueData: chartData.revenueData,
+    rideVolumeData: chartData.rideVolumeData,
+    trends
   }));
 });
 
@@ -181,12 +196,24 @@ export const getRiderById = asyncHandler(async (req: Request, res: Response) => 
  * @access  Protected (admin)
  */
 export const approveRider = asyncHandler(async (req: Request, res: Response) => {
-  const profile = await RiderProfile.findByIdAndUpdate(
-    req.params.id,
-    { kycStatus: KYCStatus.APPROVED, kycRejectionReason: undefined },
-    { new: true }
-  );
+  const profile = await RiderProfile.findById(req.params.id);
+  
   if (!profile) throw new ApiError(404, 'Rider profile not found');
+
+  // Auto-approve all documents if they are not already approved
+  if (profile.documents && profile.documents.length > 0) {
+    profile.documents.forEach((doc: any) => {
+      if (doc.status !== 'APPROVED') {
+        doc.status = 'APPROVED';
+        doc.isVerified = true;
+      }
+    });
+  }
+
+  profile.kycStatus = KYCStatus.APPROVED;
+  profile.kycRejectionReason = undefined;
+  await profile.save();
+
   res.status(200).json(new ApiResponse(200, 'Rider KYC approved', profile));
 });
 
@@ -226,6 +253,86 @@ export const deleteRider = asyncHandler(async (req: Request, res: Response) => {
 });
 
 /**
+ * @route   GET /api/v1/admin/payouts
+ * @desc    Get all payout requests (paginated)
+ * @access  Protected (admin)
+ */
+export const listPayoutRequests = asyncHandler(async (req: Request, res: Response) => {
+  const { status } = req.query;
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 15;
+  const skip = (page - 1) * limit;
+
+  const filter: Record<string, unknown> = {};
+  if (status && status !== 'all') filter.status = status as string;
+
+  const [payouts, total] = await Promise.all([
+    PayoutRequest.find(filter)
+      .populate('rider', 'name phoneNumber')
+      .populate('bankAccount')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit),
+    PayoutRequest.countDocuments(filter),
+  ]);
+
+  res.status(200).json(new ApiResponse(200, 'Payout requests fetched', {
+    payouts, page, limit, total, totalPages: Math.ceil(total / limit),
+  }));
+});
+
+/**
+ * @route   POST /api/v1/admin/payouts/bulk
+ * @desc    Update multiple payout requests (Bulk Approve)
+ * @access  Protected (Super Admin / Admin)
+ */
+export const bulkUpdatePayouts = asyncHandler(async (req: Request, res: Response) => {
+  const { payoutIds, status, transactionRef, remarks } = req.body;
+  if (!payoutIds || !Array.isArray(payoutIds) || payoutIds.length === 0) {
+    throw new ApiError(400, 'Please provide an array of payout IDs');
+  }
+
+  // Find all pending payouts in this list
+  const payouts = await PayoutRequest.find({ _id: { $in: payoutIds }, status: 'pending' } as any);
+  
+  const processedCount = payouts.length;
+  if (processedCount === 0) {
+    throw new ApiError(400, 'No valid pending payouts found for the provided IDs');
+  }
+
+  const { RiderProfile } = await import('../models/RiderProfile');
+
+  for (const payout of payouts) {
+    if (status === 'rejected') {
+      const riderProfile = await RiderProfile.findOne({ user: payout.rider });
+      if (riderProfile) {
+        riderProfile.walletBalance += payout.amount;
+        await riderProfile.save();
+        
+        await WalletTransaction.create({
+          user: payout.rider,
+          type: WalletTransactionType.TOPUP,
+          amount: payout.amount,
+          description: `Refund for rejected payout request`,
+          referenceId: payout._id.toString(),
+          balanceAfter: riderProfile.walletBalance
+        });
+      }
+    }
+    
+    payout.status = status;
+    payout.processedAt = new Date();
+    payout.processedBy = req.user?._id as unknown as mongoose.Types.ObjectId;
+    payout.remarks = remarks;
+    payout.transactionRef = transactionRef;
+    
+    await payout.save();
+  }
+
+  res.status(200).json(new ApiResponse(200, `Successfully processed ${processedCount} payouts`, { processedCount }));
+});
+
+/**
  * @route   PUT /api/v1/admin/riders/:id/documents/:docType/status
  * @desc    Approve or reject a specific document
  * @access  Protected (admin)
@@ -234,10 +341,12 @@ export const updateDocumentStatus = asyncHandler(async (req: Request, res: Respo
   const { id, docType } = req.params;
   const { status, reason } = req.body;
 
-  if (!['APPROVED', 'REJECTED'].includes(status)) {
+  const upperStatus = status?.toUpperCase();
+
+  if (!['APPROVED', 'REJECTED'].includes(upperStatus)) {
     throw new ApiError(400, 'Invalid status');
   }
-  if (status === 'REJECTED' && !reason) {
+  if (upperStatus === 'REJECTED' && !reason) {
     throw new ApiError(400, 'Rejection reason is required');
   }
 
@@ -249,8 +358,8 @@ export const updateDocumentStatus = asyncHandler(async (req: Request, res: Respo
     throw new ApiError(404, 'Document not found');
   }
 
-  profile.documents[docIndex].status = status;
-  profile.documents[docIndex].rejectionReason = status === 'REJECTED' ? reason : undefined;
+  profile.documents[docIndex].status = upperStatus;
+  profile.documents[docIndex].rejectionReason = upperStatus === 'REJECTED' ? reason : undefined;
 
   // Check overall KYC status based on documents
   const allApproved = profile.documents.length > 0 && profile.documents.every(d => d.status === 'APPROVED');
@@ -361,26 +470,60 @@ export const getUsers = asyncHandler(async (req: Request, res: Response) => {
 
 /**
  * @route   GET /api/v1/admin/sos
- * @desc    Get active SOS alerts
+ * @desc    Get SOS alerts (paginated, filterable by status)
  * @access  Protected (admin)
  */
 export const getSOSAlerts = asyncHandler(async (req: Request, res: Response) => {
-  const alerts = await SOSAlert.find({ status: 'active' })
-    .populate('triggeredBy', 'name phoneNumber')
-    .sort({ createdAt: -1 });
-  res.status(200).json(new ApiResponse(200, 'Active SOS alerts fetched', alerts));
+  const { status } = req.query;
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 15;
+  const skip = (page - 1) * limit;
+
+  const filter: Record<string, unknown> = {};
+  if (status && status !== 'all') filter.status = status as string;
+
+  const [alerts, total] = await Promise.all([
+    SOSAlert.find(filter)
+      .populate('triggeredBy', 'name phoneNumber')
+      .populate('rideId', '_id status')
+      .sort({ createdAt: -1 }).skip(skip).limit(limit),
+    SOSAlert.countDocuments(filter),
+  ]);
+
+  // Also get active count for badge
+  const activeCount = await SOSAlert.countDocuments({ status: 'active' });
+
+  res.status(200).json(new ApiResponse(200, 'SOS alerts fetched', {
+    alerts, page, limit, total, totalPages: Math.ceil(total / limit), activeCount,
+  }));
 });
 
 /**
  * @route   GET /api/v1/admin/insurance
- * @desc    Get insurance claims
+ * @desc    Get insurance claims (paginated, filterable)
  * @access  Protected (admin)
  */
 export const getInsuranceClaims = asyncHandler(async (req: Request, res: Response) => {
-  const claims = await InsuranceClaim.find()
-    .populate('userId', 'name phoneNumber')
-    .sort({ createdAt: -1 });
-  res.status(200).json(new ApiResponse(200, 'Insurance claims fetched', claims));
+  const { status, claimType } = req.query;
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 15;
+  const skip = (page - 1) * limit;
+
+  const filter: Record<string, unknown> = {};
+  if (status && status !== 'all') filter.status = status as string;
+  if (claimType && claimType !== 'all') filter.claimType = claimType as string;
+
+  const [claims, total] = await Promise.all([
+    InsuranceClaim.find(filter)
+      .populate('userId', 'name phoneNumber')
+      .populate('rideId', '_id status')
+      .sort({ createdAt: -1 }).skip(skip).limit(limit),
+    InsuranceClaim.countDocuments(filter),
+  ]);
+
+  res.status(200).json(new ApiResponse(200, 'Insurance claims fetched', {
+    claims, page, limit, total, totalPages: Math.ceil(total / limit),
+  }));
 });
 
 /**
@@ -427,4 +570,300 @@ export const resolveSOSAlert = asyncHandler(async (req: Request, res: Response) 
   );
   if (!alert) throw new ApiError(404, 'SOS Alert not found');
   res.status(200).json(new ApiResponse(200, 'SOS Alert resolved', alert));
+});
+
+/**
+ * @route   PUT /api/v1/admin/sos/:id/false-alarm
+ * @desc    Mark an SOS alert as false alarm
+ * @access  Protected (admin)
+ */
+export const markSOSFalseAlarm = asyncHandler(async (req: Request, res: Response) => {
+  const { resolutionNotes } = req.body;
+  const alert = await SOSAlert.findByIdAndUpdate(
+    req.params.id,
+    { status: 'false_alarm', resolvedBy: req.user?._id, resolutionNotes },
+    { new: true }
+  );
+  if (!alert) throw new ApiError(404, 'SOS Alert not found');
+  res.status(200).json(new ApiResponse(200, 'SOS Alert marked as false alarm', alert));
+});
+
+/**
+ * @route   GET /api/v1/admin/rides
+ * @desc    Get all rides (paginated, filterable by status, search, date)
+ * @access  Protected (admin)
+ */
+export const getAllRides = asyncHandler(async (req: Request, res: Response) => {
+  const { status, search, startDate, endDate } = req.query;
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 15;
+  const skip = (page - 1) * limit;
+
+  const filter: any = {};
+
+  // Status filter
+  if (status && status !== 'all') {
+    if (status === 'active') {
+      filter.status = { $in: [
+        RideStatus.REQUESTED, RideStatus.RIDER_SEARCH, RideStatus.RIDER_ASSIGNED,
+        RideStatus.ACCEPTED, RideStatus.RIDER_EN_ROUTE, RideStatus.RIDER_ARRIVED,
+        RideStatus.OTP_VERIFICATION, RideStatus.STARTED, RideStatus.IN_PROGRESS
+      ]};
+    } else if (status === 'completed') {
+      filter.status = { $in: [RideStatus.COMPLETED, RideStatus.PAYMENT_COMPLETED, RideStatus.CLOSED] };
+    } else if (status === 'cancelled') {
+      filter.status = { $in: [RideStatus.RIDER_CANCELLED, RideStatus.PASSENGER_CANCELLED, RideStatus.NO_SHOW, RideStatus.TIMED_OUT] };
+    } else {
+      filter.status = status as string;
+    }
+  }
+
+  // Date range filter
+  if (startDate || endDate) {
+    filter.createdAt = {};
+    if (startDate) filter.createdAt.$gte = new Date(startDate as string);
+    if (endDate) filter.createdAt.$lte = new Date(endDate as string);
+  }
+
+  // Search by passenger or rider name
+  if (search) {
+    const matchingUsers = await User.find({
+      $or: [
+        { name: { $regex: search as string, $options: 'i' } },
+        { phoneNumber: { $regex: search as string, $options: 'i' } }
+      ]
+    }).select('_id');
+    const userIds = matchingUsers.map(u => u._id);
+    filter.$or = [{ passenger: { $in: userIds } }, { rider: { $in: userIds } }];
+  }
+
+  const [rides, total] = await Promise.all([
+    Ride.find(filter)
+      .populate('passenger', 'name phoneNumber')
+      .populate('rider', 'name phoneNumber')
+      .sort({ createdAt: -1 }).skip(skip).limit(limit),
+    Ride.countDocuments(filter),
+  ]);
+
+  res.status(200).json(new ApiResponse(200, 'All rides fetched', {
+    rides, page, limit, total, totalPages: Math.ceil(total / limit),
+  }));
+});
+
+/**
+ * @route   GET /api/v1/admin/rides/:id
+ * @desc    Get detailed ride view
+ * @access  Protected (admin)
+ */
+export const getRideById = asyncHandler(async (req: Request, res: Response) => {
+  const ride = await Ride.findById(req.params.id)
+    .populate('passenger', 'name phoneNumber email gender city emergencyContacts')
+    .populate('rider', 'name phoneNumber')
+    .populate('childProfile');
+
+  if (!ride) throw new ApiError(404, 'Ride not found');
+
+  // Get rider profile for vehicle info
+  let riderProfile = null;
+  if (ride.rider) {
+    riderProfile = await RiderProfile.findOne({ user: ride.rider._id })
+      .select('vehicleNumber vehicleModel vehicleColor rating profileImage');
+  }
+
+  // Get SOS alerts for this ride
+  const sosAlerts = await SOSAlert.find({ rideId: ride._id })
+    .populate('triggeredBy', 'name phoneNumber');
+
+  // Get disputes for this ride
+  const disputes = await Dispute.find({ ride: ride._id })
+    .populate('raisedBy', 'name phoneNumber');
+
+  res.status(200).json(new ApiResponse(200, 'Ride details fetched', {
+    ride, riderProfile, sosAlerts, disputes,
+  }));
+});
+
+/**
+ * @route   PUT /api/v1/admin/insurance/:id/status
+ * @desc    Update insurance claim status
+ * @access  Protected (admin)
+ */
+export const updateInsuranceClaimStatus = asyncHandler(async (req: Request, res: Response) => {
+  const { status, amountApproved, adminNotes } = req.body;
+
+  if (!['processing', 'approved', 'rejected'].includes(status)) {
+    throw new ApiError(400, 'Invalid status. Must be processing, approved, or rejected');
+  }
+
+  const updateData: any = { status, adminNotes };
+  if (status === 'approved' && amountApproved !== undefined) {
+    updateData.amountApproved = amountApproved;
+  }
+
+  const claim = await InsuranceClaim.findByIdAndUpdate(
+    req.params.id,
+    updateData,
+    { new: true }
+  ).populate('userId', 'name phoneNumber');
+
+  if (!claim) throw new ApiError(404, 'Insurance claim not found');
+  res.status(200).json(new ApiResponse(200, `Claim ${status} successfully`, claim));
+});
+
+/**
+ * @route   GET /api/v1/admin/passengers/:id
+ * @desc    Get passenger details with ride history and wallet
+ * @access  Protected (admin)
+ */
+export const getPassengerById = asyncHandler(async (req: Request, res: Response) => {
+  const user = await User.findById(req.params.id).select('-sessions');
+  if (!user) throw new ApiError(404, 'Passenger not found');
+  if (user.role !== 'passenger') throw new ApiError(400, 'User is not a passenger');
+
+  // Child profiles
+  const childProfiles = await ChildProfile.find({ passenger: user._id });
+
+  // Recent rides
+  const recentRides = await Ride.find({ passenger: user._id })
+    .populate('rider', 'name phoneNumber')
+    .sort({ createdAt: -1 }).limit(10);
+
+  // Wallet transactions
+  const transactions = await WalletTransaction.find({ user: user._id })
+    .sort({ createdAt: -1 }).limit(10);
+
+  // Stats
+  const totalRides = await Ride.countDocuments({ passenger: user._id });
+  const completedRides = await Ride.countDocuments({ passenger: user._id, status: RideStatus.COMPLETED });
+
+  res.status(200).json(new ApiResponse(200, 'Passenger details fetched', {
+    user, childProfiles, recentRides, transactions, totalRides, completedRides,
+  }));
+});
+
+/**
+ * @route   PUT /api/v1/admin/payouts/:id
+ * @desc    Approve or reject a payout request
+ * @access  Protected (admin)
+ */
+export const updatePayoutRequest = asyncHandler(async (req: Request, res: Response) => {
+  const { status, remarks, transactionRef } = req.body;
+  
+  if (!['approved', 'rejected', 'completed'].includes(status)) {
+    throw new ApiError(400, 'Invalid status');
+  }
+
+  const payout = await PayoutRequest.findById(req.params.id);
+  if (!payout) throw new ApiError(404, 'Payout request not found');
+  if (payout.status !== 'pending') {
+    throw new ApiError(400, `Payout is already ${payout.status}`);
+  }
+
+  payout.status = status;
+  payout.remarks = remarks;
+  payout.transactionRef = transactionRef;
+  payout.processedAt = new Date();
+  payout.processedBy = req.user?._id as unknown as mongoose.Types.ObjectId;
+
+  if (status === 'rejected') {
+    // Refund the amount to rider's wallet
+    const riderProfile = await RiderProfile.findOne({ user: payout.rider });
+    if (riderProfile) {
+      riderProfile.walletBalance += payout.amount;
+      await riderProfile.save();
+
+      await WalletTransaction.create({
+        user: payout.rider,
+        type: WalletTransactionType.REFUND,
+        amount: payout.amount,
+        description: `Refund for rejected payout request`,
+        referenceId: payout._id.toString(),
+        balanceAfter: riderProfile.walletBalance
+      });
+    }
+  }
+
+  await payout.save();
+  res.status(200).json(new ApiResponse(200, `Payout ${status}`, payout));
+});
+
+/**
+ * @route   GET /api/v1/admin/riders/:id/wallet
+ * @desc    Get wallet transactions for a specific rider
+ * @access  Protected (admin)
+ */
+export const getRiderWalletHistory = asyncHandler(async (req: Request, res: Response) => {
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 15;
+  const skip = (page - 1) * limit;
+  const riderId = req.params.id;
+
+  const riderProfile = await RiderProfile.findOne({ user: riderId }).populate('user', 'name phoneNumber');
+  if (!riderProfile) throw new ApiError(404, 'Rider profile not found');
+
+  const [transactions, total] = await Promise.all([
+    WalletTransaction.find({ user: riderId })
+      .skip(skip)
+      .limit(limit)
+      .sort({ createdAt: -1 }),
+    WalletTransaction.countDocuments({ user: riderId }),
+  ]);
+
+  res.status(200).json(
+    new ApiResponse(200, 'Rider wallet history fetched', {
+      walletBalance: riderProfile.walletBalance,
+      totalEarnings: riderProfile.totalEarnings,
+      transactions,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    })
+  );
+});
+
+/**
+ * @route   GET /api/v1/admin/analytics
+ * @desc    Fetch platform analytics (Revenue, Commission, Payouts, Rides)
+ * @access  Protected (Super Admin / Admin)
+ */
+export const fetchAnalytics = asyncHandler(async (req: Request, res: Response) => {
+  const { Ride } = await import('../models/Ride');
+  const { PayoutRequest } = await import('../models/PayoutRequest');
+  
+  // Total completed rides
+  const totalRides = await Ride.countDocuments({ status: 'PAYMENT_COMPLETED' } as any);
+
+  // Total Revenue & Commission
+  const aggregation = await Ride.aggregate([
+    { $match: { status: 'PAYMENT_COMPLETED' } },
+    { $group: {
+      _id: null,
+      totalRevenue: { $sum: "$finalFare" },
+      totalCommission: { $sum: "$platformCommission" }
+    }}
+  ]);
+
+  const totalRevenue = aggregation.length > 0 ? aggregation[0].totalRevenue : 0;
+  const totalCommission = aggregation.length > 0 ? aggregation[0].totalCommission : 0;
+
+  // Total Payouts Sent
+  const payoutAgg = await PayoutRequest.aggregate([
+    { $match: { status: 'completed' } },
+    { $group: {
+      _id: null,
+      totalPayouts: { $sum: "$amount" }
+    }}
+  ]);
+
+  const totalPayouts = payoutAgg.length > 0 ? payoutAgg[0].totalPayouts : 0;
+
+  res.status(200).json(new ApiResponse(200, 'Analytics fetched successfully', {
+    totalRides,
+    totalRevenue,
+    totalCommission,
+    totalPayouts
+  }));
 });

@@ -96,4 +96,241 @@ export const whatsappService = {
       return false;
     }
   },
+
+  /**
+   * Send New Ride Request to Rider
+   */
+  async sendNewRideRequest(phoneNumber: string, pickup: string, drop: string): Promise<boolean> {
+    if (!META_WHATSAPP_TOKEN || !META_PHONE_NUMBER_ID) return false;
+    try {
+      const formattedNumber = phoneNumber.startsWith('+') ? phoneNumber.substring(1) : `91${phoneNumber}`;
+      await axios.post(
+        `https://graph.facebook.com/v19.0/${META_PHONE_NUMBER_ID}/messages`,
+        {
+          messaging_product: 'whatsapp',
+          to: formattedNumber,
+          type: 'template',
+          template: {
+            name: 'new_ride_request',
+            language: { code: 'en' },
+            components: [
+              {
+                type: 'body',
+                parameters: [
+                  { type: 'text', text: pickup },
+                  { type: 'text', text: drop }
+                ],
+              },
+            ],
+          },
+        },
+        { headers: { Authorization: `Bearer ${META_WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' } }
+      );
+      return true;
+    } catch (error) {
+      console.error('Error sending WhatsApp new_ride_request:', error);
+      return false;
+    }
+  },
+
+  /**
+   * Send Ride Accepted to Passenger
+   */
+  async sendRideAccepted(phoneNumber: string, riderName: string, vehicleInfo: string): Promise<boolean> {
+    if (!META_WHATSAPP_TOKEN || !META_PHONE_NUMBER_ID) return false;
+    try {
+      const formattedNumber = phoneNumber.startsWith('+') ? phoneNumber.substring(1) : `91${phoneNumber}`;
+      await axios.post(
+        `https://graph.facebook.com/v19.0/${META_PHONE_NUMBER_ID}/messages`,
+        {
+          messaging_product: 'whatsapp',
+          to: formattedNumber,
+          type: 'template',
+          template: {
+            name: 'ride_accepted',
+            language: { code: 'en' },
+            components: [
+              {
+                type: 'body',
+                parameters: [
+                  { type: 'text', text: riderName },
+                  { type: 'text', text: vehicleInfo }
+                ],
+              },
+            ],
+          },
+        },
+        { headers: { Authorization: `Bearer ${META_WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' } }
+      );
+      return true;
+    } catch (error) {
+      console.error('Error sending WhatsApp ride_accepted:', error);
+      return false;
+    }
+  },
+
+  async sendRiderArrived(phoneNumber: string, otp: string): Promise<boolean> {
+    if (!META_WHATSAPP_TOKEN || !META_PHONE_NUMBER_ID) return false;
+    try {
+      const formattedNumber = phoneNumber.startsWith('+') ? phoneNumber.substring(1) : `91${phoneNumber}`;
+      await axios.post(
+        `https://graph.facebook.com/v19.0/${META_PHONE_NUMBER_ID}/messages`,
+        {
+          messaging_product: 'whatsapp',
+          to: formattedNumber,
+          type: 'template',
+          template: {
+            name: 'rider_arrived',
+            language: { code: 'en' },
+            components: [
+              {
+                type: 'body',
+                parameters: [
+                  { type: 'text', text: otp }
+                ],
+              },
+            ],
+          },
+        },
+        { headers: { Authorization: `Bearer ${META_WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' } }
+      );
+      return true;
+    } catch (error) {
+      console.error('Error sending WhatsApp rider_arrived:', error);
+      return false;
+    }
+  },
+
+  /**
+   * Send Ride Started to Passenger
+   */
+  async sendRideStarted(phoneNumber: string): Promise<boolean> {
+    if (!META_WHATSAPP_TOKEN || !META_PHONE_NUMBER_ID) return false;
+    try {
+      const formattedNumber = phoneNumber.startsWith('+') ? phoneNumber.substring(1) : `91${phoneNumber}`;
+      await axios.post(
+        `https://graph.facebook.com/v19.0/${META_PHONE_NUMBER_ID}/messages`,
+        {
+          messaging_product: 'whatsapp',
+          to: formattedNumber,
+          type: 'template',
+          template: {
+            name: 'ride_started',
+            language: { code: 'en' }
+          },
+        },
+        { headers: { Authorization: `Bearer ${META_WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' } }
+      );
+      return true;
+    } catch (error) {
+      console.error('Error sending WhatsApp ride_started:', error);
+      return false;
+    }
+  },
+
+  /**
+   * Send Ride Completed to Passenger
+   */
+  async sendRideCompleted(phoneNumber: string, fare: number): Promise<boolean> {
+    if (!META_WHATSAPP_TOKEN || !META_PHONE_NUMBER_ID) return false;
+    try {
+      const formattedNumber = phoneNumber.startsWith('+') ? phoneNumber.substring(1) : `91${phoneNumber}`;
+      await axios.post(
+        `https://graph.facebook.com/v19.0/${META_PHONE_NUMBER_ID}/messages`,
+        {
+          messaging_product: 'whatsapp',
+          to: formattedNumber,
+          type: 'template',
+          template: {
+            name: 'ride_completed',
+            language: { code: 'en' },
+            components: [
+              {
+                type: 'body',
+                parameters: [
+                  { type: 'text', text: fare.toString() }
+                ],
+              },
+            ],
+          },
+        },
+        { headers: { Authorization: `Bearer ${META_WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' } }
+      );
+      return true;
+    } catch (error) {
+      console.error('Error sending WhatsApp ride_completed:', error);
+      return false;
+    }
+  },
+
+  /**
+   * Send Welcome Message to new Rider
+   */
+  async sendWelcomeMessage(phoneNumber: string, name: string): Promise<boolean> {
+    if (!META_WHATSAPP_TOKEN || !META_PHONE_NUMBER_ID) return false;
+    try {
+      const formattedNumber = phoneNumber.startsWith('+') ? phoneNumber.substring(1) : `91${phoneNumber}`;
+      await axios.post(
+        `https://graph.facebook.com/v19.0/${META_PHONE_NUMBER_ID}/messages`,
+        {
+          messaging_product: 'whatsapp',
+          to: formattedNumber,
+          type: 'template',
+          template: {
+            name: 'welcome_rider',
+            language: { code: 'en' },
+            components: [
+              {
+                type: 'body',
+                parameters: [
+                  { type: 'text', text: name }
+                ],
+              },
+            ],
+          },
+        },
+        { headers: { Authorization: `Bearer ${META_WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' } }
+      );
+      return true;
+    } catch (error) {
+      console.error('Error sending WhatsApp welcome_rider:', error);
+      return false;
+    }
+  },
+
+  /**
+   * Send Support Auto-Reply
+   */
+  async sendSupportConfirmation(phoneNumber: string, name: string, queryType: string): Promise<boolean> {
+    if (!META_WHATSAPP_TOKEN || !META_PHONE_NUMBER_ID) return false;
+    try {
+      const formattedNumber = phoneNumber.startsWith('+') ? phoneNumber.substring(1) : `91${phoneNumber}`;
+      await axios.post(
+        `https://graph.facebook.com/v19.0/${META_PHONE_NUMBER_ID}/messages`,
+        {
+          messaging_product: 'whatsapp',
+          to: formattedNumber,
+          type: 'template',
+          template: {
+            name: 'support_ticket_created',
+            language: { code: 'en' },
+            components: [
+              {
+                type: 'body',
+                parameters: [
+                  { type: 'text', text: name },
+                  { type: 'text', text: queryType }
+                ],
+              },
+            ],
+          },
+        },
+        { headers: { Authorization: `Bearer ${META_WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' } }
+      );
+      return true;
+    } catch (error) {
+      console.error('Error sending WhatsApp support_ticket_created:', error);
+      return false;
+    }
+  }
 };

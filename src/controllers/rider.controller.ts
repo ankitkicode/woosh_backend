@@ -7,7 +7,10 @@ import { User } from '../models/User';
 import { RiderProfile } from '../models/RiderProfile';
 import { WalletTransaction } from '../models/WalletTransaction';
 import { Ride } from '../models/Ride';
-import { KYCStatus, DocumentType, UserRole, RideStatus } from '../config/constants';
+import { PayoutRequest } from '../models/PayoutRequest';
+import { BankAccount } from '../models/BankAccount';
+import { KYCStatus, DocumentType, UserRole, RideStatus, WalletTransactionType } from '../config/constants';
+import { whatsappService } from '../services/whatsapp.service';
 
 /**
  * @route   GET /api/v1/rider/profile
@@ -28,6 +31,9 @@ export const getRiderProfile = asyncHandler(async (req: Request, res: Response) 
 export const updateRiderProfile = asyncHandler(async (req: Request, res: Response) => {
   const { name, email, gender, dateOfBirth, city, vehicleNumber, vehicleModel, vehicleColor } = req.body;
   
+  const existingProfile = await RiderProfile.findOne({ user: req.user?._id });
+  const isNewProfile = !existingProfile;
+
   const user = await User.findByIdAndUpdate(
     req.user?._id, 
     { name, email, gender, dateOfBirth, city }, 
@@ -39,6 +45,11 @@ export const updateRiderProfile = asyncHandler(async (req: Request, res: Respons
     { vehicleNumber, vehicleModel, vehicleColor },
     { new: true, upsert: true, runValidators: true }
   );
+
+  // if (isNewProfile && user?.phoneNumber && user?.name) {
+  //   await whatsappService.sendWelcomeMessage(user.phoneNumber, user.name);
+  // }
+
   res.status(200).json(new ApiResponse(200, 'Profile updated', { user, riderProfile }));
 });
 
@@ -233,7 +244,7 @@ export const getEarnings = asyncHandler(async (req: Request, res: Response) => {
           rideEndedAt: { $gte: startOfDay }
         } 
       },
-      { $group: { _id: null, total: { $sum: "$finalFare" }, count: { $sum: 1 } } }
+      { $group: { _id: null, total: { $sum: { $ifNull: ["$riderEarnings", "$finalFare"] } }, count: { $sum: 1 } } }
     ]),
     Ride.aggregate([
       { 
@@ -243,7 +254,7 @@ export const getEarnings = asyncHandler(async (req: Request, res: Response) => {
           rideEndedAt: { $gte: startOfMonth }
         } 
       },
-      { $group: { _id: null, total: { $sum: "$finalFare" }, count: { $sum: 1 } } }
+      { $group: { _id: null, total: { $sum: { $ifNull: ["$riderEarnings", "$finalFare"] } }, count: { $sum: 1 } } }
     ])
   ]);
 
@@ -265,4 +276,108 @@ export const getEarnings = asyncHandler(async (req: Request, res: Response) => {
     },
     recentTransactions,
   }));
+});
+
+/**
+ * @route   POST /api/v1/rider/wallet/payout
+ * @desc    Request a payout from wallet
+ * @access  Protected (rider)
+ */
+export const requestPayout = asyncHandler(async (req: Request, res: Response) => {
+  const { amount } = req.body;
+  if (!amount || amount < 100) throw new ApiError(400, 'Minimum payout amount is ₹100');
+
+  const riderProfile = await RiderProfile.findOne({ user: req.user?._id });
+  if (!riderProfile) throw new ApiError(404, 'Rider profile not found');
+
+  if (riderProfile.walletBalance < amount) {
+    throw new ApiError(400, 'Insufficient wallet balance');
+  }
+
+  // Check for primary bank account
+  const primaryAccount = await BankAccount.findOne({ rider: req.user?._id, isPrimary: true });
+  if (!primaryAccount) {
+    throw new ApiError(400, 'Please set a primary bank account before requesting a payout');
+  }
+
+  // Check if they already have a pending request
+  const existingPending = await PayoutRequest.findOne({ rider: req.user?._id, status: 'pending' } as any);
+  if (existingPending) {
+    throw new ApiError(400, 'You already have a pending payout request');
+  }
+
+  // Deduct from wallet immediately
+  riderProfile.walletBalance -= amount;
+  await riderProfile.save();
+
+  // Create Payout Request
+  const payout = await PayoutRequest.create({
+    rider: req.user?._id,
+    amount,
+    bankAccount: primaryAccount._id
+  });
+
+  // Create Wallet Transaction
+  await WalletTransaction.create({
+    user: req.user?._id,
+    type: WalletTransactionType.PAYOUT, // Alternatively we could have a WITHDRAWAL enum
+    amount: amount,
+    description: `Payout Request`,
+    referenceId: payout._id.toString(),
+    balanceAfter: riderProfile.walletBalance
+  });
+
+  res.status(201).json(new ApiResponse(201, 'Payout requested successfully', payout));
+});
+
+/**
+ * @route   POST /api/v1/rider/bank-accounts
+ * @desc    Add a bank account
+ * @access  Protected (rider)
+ */
+export const addBankAccount = asyncHandler(async (req: Request, res: Response) => {
+  const { accountHolderName, accountNumber, ifscCode, bankName, isPrimary } = req.body;
+  if (!accountHolderName || !accountNumber || !ifscCode || !bankName) {
+    throw new ApiError(400, 'All bank details are required');
+  }
+
+  // Check if this is the first account, make it primary automatically
+  const count = await BankAccount.countDocuments({ rider: req.user?._id });
+  const shouldBePrimary = count === 0 ? true : isPrimary;
+
+  const account = await BankAccount.create({
+    rider: req.user?._id,
+    accountHolderName,
+    accountNumber,
+    ifscCode,
+    bankName,
+    isPrimary: shouldBePrimary,
+  });
+
+  res.status(201).json(new ApiResponse(201, 'Bank account added', account));
+});
+
+/**
+ * @route   GET /api/v1/rider/bank-accounts
+ * @desc    Get rider's bank accounts
+ * @access  Protected (rider)
+ */
+export const getBankAccounts = asyncHandler(async (req: Request, res: Response) => {
+  const accounts = await BankAccount.find({ rider: req.user?._id });
+  res.status(200).json(new ApiResponse(200, 'Bank accounts fetched', accounts));
+});
+
+/**
+ * @route   PUT /api/v1/rider/bank-accounts/:id/primary
+ * @desc    Set bank account as primary
+ * @access  Protected (rider)
+ */
+export const setPrimaryBankAccount = asyncHandler(async (req: Request, res: Response) => {
+  const account = await BankAccount.findOne({ _id: req.params.id, rider: req.user?._id });
+  if (!account) throw new ApiError(404, 'Bank account not found');
+
+  account.isPrimary = true;
+  await account.save(); // Pre-save hook will set others to false
+
+  res.status(200).json(new ApiResponse(200, 'Primary bank account updated', account));
 });
