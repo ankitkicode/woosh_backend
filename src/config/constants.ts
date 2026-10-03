@@ -56,6 +56,7 @@ export enum PaymentMethod {
   CREDIT_CARD = 'credit_card',
   NET_BANKING = 'net_banking',
   WALLET = 'wallet',
+  ONLINE = 'online',
 }
 
 export enum PaymentStatus {
