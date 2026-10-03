@@ -110,6 +110,6 @@ app.use((err: ApiError, _req: Request, res: Response, _next: NextFunction) => {
 
 // ─── Start Server ────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
+server.listen(Number(PORT), '0.0.0.0', () => {
   console.log(`\n✅ Woosh Backend running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);
 });

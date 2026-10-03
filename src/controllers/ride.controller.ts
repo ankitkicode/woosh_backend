@@ -334,45 +334,55 @@ export const startRide = asyncHandler(async (req: Request, res: Response) => {
 export const completeRide = asyncHandler(async (req: Request, res: Response) => {
   const ride = await Ride.findOne({ _id: req.params.id, rider: req.user?._id, status: RideStatus.STARTED });
   if (!ride) throw new ApiError(404, 'Ride not found or not started');
-  ride.status = RideStatus.COMPLETED;
   ride.rideEndedAt = new Date();
 
-  // Calculate waiting charges (₹2/min after 3 min free wait)
-  if (ride.riderArrivedAt && ride.rideStartedAt) {
-    const waitMs = ride.rideStartedAt.getTime() - ride.riderArrivedAt.getTime();
-    const waitMins = Math.floor(waitMs / 60000);
-    const chargeableMins = Math.max(0, waitMins - 3); // 3 min free
-    ride.waitingCharges = chargeableMins * 2; // ₹2/min
-  }
-
-  ride.finalFare = (ride.estimatedFare || 0) + (ride.waitingCharges || 0);
-
-  // Calculate Platform Commission
-  let platformCommissionRate = 20;
-  const config = await SystemConfig.findOne();
-  if (config && config.platformCommissionRate) {
-    platformCommissionRate = config.platformCommissionRate;
-  }
-  
-  const finalFare = ride.finalFare || 0;
-  const platformCommission = Number((finalFare * (platformCommissionRate / 100)).toFixed(2));
-  const riderEarnings = Number((finalFare - platformCommission).toFixed(2));
-  
-  ride.platformCommission = platformCommission;
-  ride.riderEarnings = riderEarnings;
-
-  // Generate Razorpay Order
-  let razorpayOrder = null;
-  if (ride.paymentMethod === PaymentMethod.UPI || ride.paymentMethod === PaymentMethod.CREDIT_CARD || ride.paymentMethod === PaymentMethod.DEBIT_CARD || ride.paymentMethod === PaymentMethod.NET_BANKING) {
-    try {
-      razorpayOrder = await paymentService.createOrder(finalFare, `Ride-${ride._id}`);
-      ride.razorpayOrderId = razorpayOrder.id;
-    } catch (err: any) {
-      console.error('[Razorpay] Order creation failed:', err.message);
+  // If already paid online, skip recalculating fare and commission
+  if (ride.paymentStatus === PaymentStatus.PAID) {
+    ride.status = RideStatus.PAYMENT_COMPLETED;
+    await ride.save();
+  } else {
+    ride.status = RideStatus.COMPLETED;
+    
+    // Calculate waiting charges (₹2/min after 3 min free wait)
+    if (ride.riderArrivedAt && ride.rideStartedAt) {
+      const waitMs = ride.rideStartedAt.getTime() - ride.riderArrivedAt.getTime();
+      const waitMins = Math.floor(waitMs / 60000);
+      const chargeableMins = Math.max(0, waitMins - 3); // 3 min free
+      ride.waitingCharges = chargeableMins * 2; // ₹2/min
     }
-  }
 
-  await ride.save();
+    ride.finalFare = (ride.estimatedFare || 0) + (ride.waitingCharges || 0);
+
+    // Calculate Platform Commission
+    let platformCommissionRate = 20;
+    import('../models/SystemConfig').then(async ({ SystemConfig }) => {
+      const config = await SystemConfig.findOne();
+      if (config && config.platformCommissionRate) {
+        platformCommissionRate = config.platformCommissionRate;
+      }
+      
+      const finalFare = ride.finalFare || 0;
+      const platformCommission = Number((finalFare * (platformCommissionRate / 100)).toFixed(2));
+      const riderEarnings = Number((finalFare - platformCommission).toFixed(2));
+      
+      ride.platformCommission = platformCommission;
+      ride.riderEarnings = riderEarnings;
+      
+      // Generate Razorpay Order for late payment
+      let razorpayOrder = null;
+      if (ride.paymentMethod === PaymentMethod.UPI || ride.paymentMethod === PaymentMethod.CREDIT_CARD || ride.paymentMethod === PaymentMethod.DEBIT_CARD || ride.paymentMethod === PaymentMethod.NET_BANKING) {
+        try {
+          const { paymentService } = await import('../services/payment.service');
+          razorpayOrder = await paymentService.createOrder(finalFare, `Ride-${ride._id}`);
+          ride.razorpayOrderId = razorpayOrder.id;
+        } catch (err: any) {
+          console.error('[Razorpay] Order creation failed:', err.message);
+        }
+      }
+      await ride.save();
+    }).catch(console.error);
+    await ride.save();
+  }
 
   // Notify passenger that ride is complete
   // try {
@@ -403,9 +413,11 @@ export const completeRide = asyncHandler(async (req: Request, res: Response) => 
       waitingCharges: ride.waitingCharges,
       paymentMethod: ride.paymentMethod,
       razorpayOrderId: ride.razorpayOrderId,
-      message: ride.paymentMethod === PaymentMethod.CASH
-        ? `Collect ₹${ride.finalFare} cash from the passenger.`
-        : 'Passenger is paying online via Razorpay in their app.',
+      message: ride.paymentStatus === PaymentStatus.PAID 
+        ? `Payment of ₹${ride.finalFare} already received online.`
+        : (ride.paymentMethod === PaymentMethod.CASH
+            ? `Collect ₹${ride.finalFare} cash from the passenger.`
+            : 'Passenger is paying online via Razorpay in their app.'),
     }
   }));
 });
