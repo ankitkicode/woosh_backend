@@ -29,14 +29,23 @@ export const getRiderProfile = asyncHandler(async (req: Request, res: Response) 
  * @access  Protected (rider)
  */
 export const updateRiderProfile = asyncHandler(async (req: Request, res: Response) => {
-  const { name, email, gender, dateOfBirth, city, vehicleNumber, vehicleModel, vehicleColor, areas } = req.body;
+  const { name, email, gender, dateOfBirth, city, vehicleNumber, vehicleModel, vehicleColor, areas, emergencyContacts } = req.body;
   
   const existingProfile = await RiderProfile.findOne({ user: req.user?._id });
   const isNewProfile = !existingProfile;
 
+  // Normalize emergency contacts since frontend might send 'phone' instead of 'phoneNumber'
+  let normalizedContacts = emergencyContacts;
+  if (Array.isArray(emergencyContacts)) {
+    normalizedContacts = emergencyContacts.map((c: any) => ({
+      name: c.name,
+      phoneNumber: c.phoneNumber || c.phone || '',
+    }));
+  }
+
   const user = await User.findByIdAndUpdate(
     req.user?._id, 
-    { name, email, gender, dateOfBirth, city }, 
+    { name, email, gender, dateOfBirth, city, emergencyContacts: normalizedContacts }, 
     { new: true, runValidators: true }
   ).select('-refreshToken');
 

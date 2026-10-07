@@ -71,7 +71,10 @@ export const sendOTP = asyncHandler(async (req: Request, res: Response) => {
       // during onboarding can login and resume their registration in the app.
     } else if (action === 'register') {
       if (existingUser && (existingUser.role === UserRole.RIDER || existingUser.role === UserRole.BOTH)) {
-        throw new ApiError(403, 'You are already registered. Please login instead.');
+        const riderProfile = await RiderProfile.findOne({ user: existingUser._id });
+        if (riderProfile) {
+          throw new ApiError(403, 'You are already registered. Please login instead.');
+        }
       }
     }
   }
