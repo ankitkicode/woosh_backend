@@ -76,8 +76,8 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
     totalPassengers, totalRiders, totalRides, activeRides,
     pendingKYC, openComplaints, completedRides, chartData, trends, revenueResult
   ] = await Promise.all([
-    User.countDocuments({ role: 'passenger' } as Record<string, unknown>),
-    User.countDocuments({ role: 'rider' } as Record<string, unknown>),
+    User.countDocuments({ role: { $in: ['passenger', 'both'] } } as Record<string, unknown>),
+    User.countDocuments({ role: { $in: ['rider', 'both'] } } as Record<string, unknown>),
     Ride.countDocuments(),
     Ride.countDocuments({ status: { $in: [RideStatus.ACCEPTED, RideStatus.STARTED] } }),
     RiderProfile.countDocuments({ kycStatus: KYCStatus.UNDER_REVIEW }),
@@ -450,7 +450,13 @@ export const getUsers = asyncHandler(async (req: Request, res: Response) => {
   const skip = (page - 1) * limit;
 
   const filter: Record<string, unknown> = {};
-  if (role) filter.role = role as string;
+  if (role) {
+    if (role === 'passenger' || role === 'rider') {
+      filter.role = { $in: [role, 'both'] };
+    } else {
+      filter.role = role as string;
+    }
+  }
   if (search) {
     filter.$or = [
       { name: { $regex: search, $options: 'i' } },
@@ -718,7 +724,7 @@ export const updateInsuranceClaimStatus = asyncHandler(async (req: Request, res:
 export const getPassengerById = asyncHandler(async (req: Request, res: Response) => {
   const user = await User.findById(req.params.id).select('-sessions');
   if (!user) throw new ApiError(404, 'Passenger not found');
-  if (user.role !== 'passenger') throw new ApiError(400, 'User is not a passenger');
+  if (user.role !== 'passenger' && user.role !== 'both') throw new ApiError(400, 'User is not a passenger');
 
   // Child profiles
   const childProfiles = await ChildProfile.find({ passenger: user._id });

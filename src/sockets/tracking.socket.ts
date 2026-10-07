@@ -12,6 +12,7 @@ import { Ride } from '../models/Ride';
  *  - ride:sos               → SOS alert broadcasted to all admin sockets
  */
 export let ioInstance: Server;
+export const getIo = () => ioInstance;
 
 export const registerTrackingSocket = (io: Server) => {
   ioInstance = io;

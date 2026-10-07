@@ -135,7 +135,8 @@ export const requestRide = asyncHandler(async (req: Request, res: Response) => {
   // }    
       // Also emit via socket.io for real-time app update
       try {
-        const { ioInstance } = await import('../sockets/tracking.socket');
+        const { getIo } = await import('../sockets/tracking.socket');
+        const ioInstance = getIo();
         if (ioInstance && initialAssignedRider) {
           console.log(`[Socket] Emitting new_ride_request to rider:${initialAssignedRider.toString()}`);
           ioInstance.to(`rider:${initialAssignedRider.toString()}`).emit('new_ride_request', {
@@ -221,7 +222,8 @@ export const acceptRide = asyncHandler(async (req: Request, res: Response) => {
     // } 
     
     // Emit via socket
-    import('../sockets/tracking.socket').then(({ ioInstance }) => {
+    import('../sockets/tracking.socket').then(({ getIo }) => {
+      const ioInstance = getIo();
       if (ioInstance) {
         ioInstance.to(`passenger:${passengerUser._id.toString()}`).emit('ride_accepted', {
           rideId: ride._id,
@@ -277,7 +279,8 @@ export const riderArrived = asyncHandler(async (req: Request, res: Response) => 
   // }
 
   // Socket notification
-  import('../sockets/tracking.socket').then(({ ioInstance }) => {
+  import('../sockets/tracking.socket').then(({ getIo }) => {
+    const ioInstance = getIo();
     if (ioInstance) {
       ioInstance.to(`passenger:${ride.passenger.toString()}`).emit('rider_arrived', {
         rideId: ride._id,
@@ -315,7 +318,8 @@ export const startRide = asyncHandler(async (req: Request, res: Response) => {
   // }
 
   // Socket notification
-  import('../sockets/tracking.socket').then(({ ioInstance }) => {
+  import('../sockets/tracking.socket').then(({ getIo }) => {
+    const ioInstance = getIo();
     if (ioInstance) {
       ioInstance.to(`passenger:${ride.passenger.toString()}`).emit('ride_started', {
         rideId: ride._id,
@@ -395,7 +399,8 @@ export const completeRide = asyncHandler(async (req: Request, res: Response) => 
   // }
 
   // Socket notification
-  import('../sockets/tracking.socket').then(({ ioInstance }) => {
+  import('../sockets/tracking.socket').then(({ getIo }) => {
+    const ioInstance = getIo();
     if (ioInstance) {
       ioInstance.to(`passenger:${ride.passenger.toString()}`).emit('ride_completed', {
         rideId: ride._id,
@@ -507,7 +512,8 @@ export const verifyDigitalPayment = asyncHandler(async (req: Request, res: Respo
   await ride.save();
 
   // Notify Rider that payment was received
-  import('../sockets/tracking.socket').then(({ ioInstance }) => {
+  import('../sockets/tracking.socket').then(({ getIo }) => {
+    const ioInstance = getIo();
     if (ioInstance && ride.rider) {
       ioInstance.to(`rider:${ride.rider.toString()}`).emit('payment_received', {
         rideId: ride._id,
@@ -540,7 +546,8 @@ export const cancelRide = asyncHandler(async (req: Request, res: Response) => {
   await ride.save();
 
   // Notify the other party if assigned, or broadcast cancellation
-  import('../sockets/tracking.socket').then(({ ioInstance }) => {
+  import('../sockets/tracking.socket').then(({ getIo }) => {
+    const ioInstance = getIo();
     if (ioInstance) {
       if (ride.rider) {
         ioInstance.to(`rider:${ride.rider}`).emit('ride_cancelled', { rideId: ride._id, cancelledBy, reason });
@@ -575,7 +582,8 @@ export const triggerSOS = asyncHandler(async (req: Request, res: Response) => {
   await ride.save();
 
   // Socket notification to admin
-  import('../sockets/tracking.socket').then(({ ioInstance }) => {
+  import('../sockets/tracking.socket').then(({ getIo }) => {
+    const ioInstance = getIo();
     if (ioInstance) {
       ioInstance.to('admin_room').emit('admin_sos_alert', {
         rideId: ride._id,
