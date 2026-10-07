@@ -29,7 +29,7 @@ export const getRiderProfile = asyncHandler(async (req: Request, res: Response) 
  * @access  Protected (rider)
  */
 export const updateRiderProfile = asyncHandler(async (req: Request, res: Response) => {
-  const { name, email, gender, dateOfBirth, city, vehicleNumber, vehicleModel, vehicleColor } = req.body;
+  const { name, email, gender, dateOfBirth, city, vehicleNumber, vehicleModel, vehicleColor, areas } = req.body;
   
   const existingProfile = await RiderProfile.findOne({ user: req.user?._id });
   const isNewProfile = !existingProfile;
@@ -40,9 +40,15 @@ export const updateRiderProfile = asyncHandler(async (req: Request, res: Respons
     { new: true, runValidators: true }
   ).select('-refreshToken');
 
+  // Convert areas string to array if necessary, since frontend passes it as a single string initially or comma-separated
+  let parsedAreas = areas;
+  if (typeof areas === 'string') {
+    parsedAreas = areas.split(',').map(a => a.trim()).filter(a => a.length > 0);
+  }
+
   const riderProfile = await RiderProfile.findOneAndUpdate(
     { user: req.user?._id },
-    { vehicleNumber, vehicleModel, vehicleColor },
+    { vehicleNumber, vehicleModel, vehicleColor, areas: parsedAreas },
     { new: true, upsert: true, runValidators: true }
   );
 

@@ -12,17 +12,15 @@ export interface ICity extends Document {
   minFare: number;
   isSurgeActive: boolean;
   surgeMultiplier: number;
-  // Geo & Service Area
-  latitude: number;
-  longitude: number;
-  serviceRadius: number; // in km
+  // Service Area
   pincodes: string[];
-  // GeoJSON for geofencing
-  location?: {
-    type: string;
-    coordinates: number[];
-  };
-  polygon?: any;
+  areas: {
+    name: string;
+    latitude: number;
+    longitude: number;
+    serviceRadius: number;
+    isActive: boolean;
+  }[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -40,17 +38,15 @@ const citySchema = new Schema<ICity>(
     minFare: { type: Number, required: true, min: 0, default: 50 },
     isSurgeActive: { type: Boolean, default: false },
     surgeMultiplier: { type: Number, default: 1, min: 1 },
-    // Geo & Service Area
-    latitude: { type: Number, default: 0 },
-    longitude: { type: Number, default: 0 },
-    serviceRadius: { type: Number, default: 25 }, // default 25km radius
+    // Service Area
     pincodes: [{ type: String, trim: true }],
-    // GeoJSON Point for geo-queries
-    location: {
-      type: { type: String, enum: ['Point'], default: 'Point' },
-      coordinates: { type: [Number], default: [0, 0] }, // [lng, lat]
-    },
-    polygon: { type: Schema.Types.Mixed },
+    areas: [{
+      name: { type: String, required: true, trim: true },
+      latitude: { type: Number, required: true },
+      longitude: { type: Number, required: true },
+      serviceRadius: { type: Number, required: true, min: 0 },
+      isActive: { type: Boolean, default: true }
+    }],
   },
   { timestamps: true }
 );
@@ -58,20 +54,7 @@ const citySchema = new Schema<ICity>(
 // Ensure city name is unique per state/country
 citySchema.index({ name: 1, state: 1, country: 1 }, { unique: true });
 
-// Geo index for location-based queries
-citySchema.index({ location: '2dsphere' });
-
 // Index on pincodes for fast pincode lookup
 citySchema.index({ pincodes: 1 });
-
-// Auto-sync location from lat/lng before save
-citySchema.pre('save', function () {
-  if (this.latitude && this.longitude) {
-    this.location = {
-      type: 'Point',
-      coordinates: [this.longitude, this.latitude],
-    };
-  }
-});
 
 export const City = mongoose.model<ICity>('City', citySchema);

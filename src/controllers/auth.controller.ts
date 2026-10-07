@@ -65,12 +65,10 @@ export const sendOTP = asyncHandler(async (req: Request, res: Response) => {
     
     if (action === 'login') {
       if (!existingUser || (existingUser.role !== UserRole.RIDER && existingUser.role !== UserRole.BOTH)) {
-        throw new ApiError(403, 'You must complete registration first.');
+        throw new ApiError(403, 'Account not found. Please register as a rider first.');
       }
-      const riderProfile = await RiderProfile.findOne({ user: existingUser._id });
-      if (!riderProfile) {
-        throw new ApiError(403, 'You must complete registration first.');
-      }
+      // Note: We deliberately do not check RiderProfile here so users who dropped off 
+      // during onboarding can login and resume their registration in the app.
     } else if (action === 'register') {
       if (existingUser && (existingUser.role === UserRole.RIDER || existingUser.role === UserRole.BOTH)) {
         throw new ApiError(403, 'You are already registered. Please login instead.');
@@ -119,11 +117,7 @@ export const sendOTP = asyncHandler(async (req: Request, res: Response) => {
   );
 });
 
-/**
- * @route   POST /api/v1/auth/verify-otp
- * @desc    Verify OTP and return access + refresh tokens
- * @access  Public
- */
+
 export const verifyOTP = asyncHandler(async (req: Request, res: Response) => {
   const { phoneNumber, otp, role, deviceId, fcmToken, os, deviceModel } = req.body;
 
@@ -201,11 +195,9 @@ export const verifyOTP = asyncHandler(async (req: Request, res: Response) => {
   );
 });
 
-/**
- * @route   POST /api/v1/auth/refresh-token
- * @desc    Generate new access token using refresh token
- * @access  Public
- */
+
+
+
 export const refreshToken = asyncHandler(async (req: Request, res: Response) => {
   const { refreshToken: token, deviceId } = req.body;
 

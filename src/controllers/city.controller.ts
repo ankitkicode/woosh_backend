@@ -25,7 +25,7 @@ export const getCityById = async (req: Request, res: Response) => {
 
 export const createCity = async (req: Request, res: Response) => {
   try {
-    const { name, state, country, baseFare, perKmRate, perMinuteRate, minFare, isSurgeActive, surgeMultiplier, latitude, longitude, serviceRadius, pincodes } = req.body;
+    const { name, state, country, baseFare, perKmRate, perMinuteRate, minFare, isSurgeActive, surgeMultiplier, pincodes, areas } = req.body;
     
     const city = await City.create({
       name,
@@ -37,10 +37,8 @@ export const createCity = async (req: Request, res: Response) => {
       minFare: minFare || 50,
       isSurgeActive: isSurgeActive || false,
       surgeMultiplier: surgeMultiplier || 1,
-      latitude: latitude || 0,
-      longitude: longitude || 0,
-      serviceRadius: serviceRadius || 25,
       pincodes: pincodes || [],
+      areas: areas || [],
     });
 
     await PricingRule.create({
@@ -69,15 +67,14 @@ export const updateCity = async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, message: 'City not found' });
     }
 
-    // Update allowed fields
-    const allowedFields = ['name', 'state', 'country', 'baseFare', 'perKmRate', 'perMinuteRate', 'minFare', 'isSurgeActive', 'surgeMultiplier', 'latitude', 'longitude', 'serviceRadius', 'pincodes', 'isActive'];
+    const allowedFields = ['name', 'state', 'country', 'baseFare', 'perKmRate', 'perMinuteRate', 'minFare', 'isSurgeActive', 'surgeMultiplier', 'pincodes', 'areas', 'isActive'];
     for (const field of allowedFields) {
       if (req.body[field] !== undefined) {
         (city as any)[field] = req.body[field];
       }
     }
 
-    await city.save(); // triggers pre-save hook for location sync
+    await city.save();
 
     // Also update PricingRule to keep them in sync
     await PricingRule.findOneAndUpdate(
