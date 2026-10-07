@@ -134,7 +134,7 @@ export const verifyOTP = asyncHandler(async (req: Request, res: Response) => {
 
   // Find or create user
   let user = await User.findOne({ phoneNumber });
-  const isNewUser = !user;
+  let isNewUser = !user;
 
   if (!user) {
     user = await User.create({
@@ -145,6 +145,16 @@ export const verifyOTP = asyncHandler(async (req: Request, res: Response) => {
     // If the user already exists but with a different primary role, upgrade them to 'both'
     user.role = UserRole.BOTH;
     await user.save();
+  }
+
+  // Handle Rider Profile drop-offs:
+  // If the user is logging into the rider app but hasn't created a RiderProfile yet,
+  // we treat them as a "new user" so the frontend automatically routes them to the registration screen.
+  if (!isNewUser && (role === UserRole.RIDER || user.role === UserRole.RIDER || user.role === UserRole.BOTH)) {
+    const riderProfile = await RiderProfile.findOne({ user: user._id });
+    if (!riderProfile) {
+      isNewUser = true;
+    }
   }
 
   // When generating the JWT, we use the role requested during login (passenger/rider)
