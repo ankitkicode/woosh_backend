@@ -53,7 +53,7 @@ export const protect = asyncHandler(async (req: Request, _res: Response, next: N
  * Apply AFTER protect middleware on rider-only routes.
  */
 export const kycGate = asyncHandler(async (req: Request, _res: Response, next: NextFunction) => {
-  if (req.user?.role !== 'rider') {
+  if (req.user?.role !== 'rider' && req.user?.role !== 'both') {
     return next(); // Non-riders skip KYC check
   }
   const { RiderProfile } = await import('../models/RiderProfile');

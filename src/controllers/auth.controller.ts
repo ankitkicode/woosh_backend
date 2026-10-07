@@ -62,10 +62,9 @@ export const sendOTP = asyncHandler(async (req: Request, res: Response) => {
   console.log(`[sendOTP] Role: ${role}, Action: ${action}, Phone: ${phoneNumber}`);
   if (role === UserRole.RIDER) {
     const existingUser = await User.findOne({ phoneNumber });
-    console.log(`[sendOTP] Existing User: ${existingUser ? existingUser.role : 'NULL'}`);
     
     if (action === 'login') {
-      if (!existingUser || existingUser.role !== UserRole.RIDER) {
+      if (!existingUser || (existingUser.role !== UserRole.RIDER && existingUser.role !== UserRole.BOTH)) {
         throw new ApiError(403, 'You must complete registration first.');
       }
       const riderProfile = await RiderProfile.findOne({ user: existingUser._id });
@@ -73,11 +72,7 @@ export const sendOTP = asyncHandler(async (req: Request, res: Response) => {
         throw new ApiError(403, 'You must complete registration first.');
       }
     } else if (action === 'register') {
-      if (existingUser && existingUser.role === UserRole.PASSENGER) {
-        throw new ApiError(403, 'This number is already registered as a Passenger. Please use a different number for Rider registration.');
-      }
-      // If user exists and is a rider, they should login, not register.
-      if (existingUser && existingUser.role === UserRole.RIDER) {
+      if (existingUser && (existingUser.role === UserRole.RIDER || existingUser.role === UserRole.BOTH)) {
         throw new ApiError(403, 'You are already registered. Please login instead.');
       }
     }
@@ -152,9 +147,15 @@ export const verifyOTP = asyncHandler(async (req: Request, res: Response) => {
       phoneNumber,
       role: role || UserRole.PASSENGER,
     });
+  } else if (user.role !== role && user.role !== UserRole.BOTH && user.role !== UserRole.ADMIN && user.role !== UserRole.SUPER_ADMIN) {
+    // If the user already exists but with a different primary role, upgrade them to 'both'
+    user.role = UserRole.BOTH;
+    await user.save();
   }
 
-  const tokenPayload = { userId: user._id.toString(), role: user.role };
+  // When generating the JWT, we use the role requested during login (passenger/rider)
+  // so the app gets the correct scoped token, even if the DB says 'both'.
+  const tokenPayload = { userId: user._id.toString(), role: role || user.role };
   const accessToken = generateAccessToken(tokenPayload);
   const refreshToken = generateRefreshToken(tokenPayload);
 

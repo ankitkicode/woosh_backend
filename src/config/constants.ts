@@ -8,6 +8,7 @@ export enum UserRole {
   RIDER = 'rider',
   ADMIN = 'admin',
   SUPER_ADMIN = 'super_admin',
+  BOTH = 'both',
 }
 
 export enum KYCStatus {

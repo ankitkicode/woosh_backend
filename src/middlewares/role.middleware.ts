@@ -11,6 +11,10 @@ export const authorize = (...roles: UserRole[]) => {
     if (!req.user) {
       return next(new ApiError(401, 'Not authenticated'));
     }
+    if (req.user.role === UserRole.BOTH && (roles.includes(UserRole.PASSENGER) || roles.includes(UserRole.RIDER))) {
+      return next();
+    }
+    
     if (!roles.includes(req.user.role as UserRole)) {
       return next(new ApiError(403, `Access denied. This route requires one of: [${roles.join(', ')}]`));
     }
