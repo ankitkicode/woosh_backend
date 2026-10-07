@@ -22,3 +22,21 @@ export const createRiderSupport = asyncHandler(async (req: Request, res: Respons
     data: support,
   });
 });
+
+export const getAllRiderSupports = asyncHandler(async (req: Request, res: Response) => {
+  const supports = await RiderSupport.find().sort({ createdAt: -1 });
+  res.status(200).json({ success: true, data: supports });
+});
+
+export const updateRiderSupportStatus = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  const support = await RiderSupport.findByIdAndUpdate(
+    id,
+    { status },
+    { new: true, runValidators: true }
+  );
+
+  res.status(200).json({ success: true, data: support });
+});

@@ -22,3 +22,21 @@ export const createContact = asyncHandler(async (req: Request, res: Response) =>
     data: contact,
   });
 });
+
+export const getAllContacts = asyncHandler(async (req: Request, res: Response) => {
+  const contacts = await Contact.find().sort({ createdAt: -1 });
+  res.status(200).json({ success: true, data: contacts });
+});
+
+export const updateContactStatus = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  const contact = await Contact.findByIdAndUpdate(
+    id,
+    { status },
+    { new: true, runValidators: true }
+  );
+
+  res.status(200).json({ success: true, data: contact });
+});
