@@ -13,6 +13,21 @@ interface ILocation {
   coordinates: [number, number]; // [longitude, latitude]
 }
 
+interface IPreferences {
+  maxPickupDistance: number;
+  acceptCashRides: boolean;
+  rideRequestSound: boolean;
+  language: string;
+  payoutSchedule: 'WEEKLY' | 'DAILY';
+}
+
+interface ISafetyPreferences {
+  shareEveryTrip: boolean;
+  stopRequestsAfter10PM: boolean;
+  rideCheck: boolean;
+  recordAudioOnSOS: boolean;
+}
+
 interface ISafetyChecklist {
   helmetAvailable: boolean;
   firstAidKitAvailable: boolean;
@@ -37,7 +52,12 @@ export interface IRiderProfile extends Document {
   safetyChecklist?: ISafetyChecklist;
   canAcceptChildRides: boolean;
   totalRides: number;
+  totalRideRequests: number;
+  acceptedRides: number;
   totalEarnings: number;
+  onlineHours: number;
+  preferences: IPreferences;
+  safetyPreferences: ISafetyPreferences;
   walletBalance: number;
   rating: number;
   totalRatings: number;
@@ -78,7 +98,23 @@ const riderProfileSchema = new Schema<IRiderProfile>(
       coordinates: { type: [Number], default: undefined },
     },
     totalRides: { type: Number, default: 0 },
+    totalRideRequests: { type: Number, default: 0 },
+    acceptedRides: { type: Number, default: 0 },
     totalEarnings: { type: Number, default: 0 },
+    onlineHours: { type: Number, default: 0 },
+    preferences: {
+      maxPickupDistance: { type: Number, default: 3 },
+      acceptCashRides: { type: Boolean, default: true },
+      rideRequestSound: { type: Boolean, default: true },
+      language: { type: String, default: 'English' },
+      payoutSchedule: { type: String, enum: ['WEEKLY', 'DAILY'], default: 'WEEKLY' }
+    },
+    safetyPreferences: {
+      shareEveryTrip: { type: Boolean, default: false },
+      stopRequestsAfter10PM: { type: Boolean, default: false },
+      rideCheck: { type: Boolean, default: true },
+      recordAudioOnSOS: { type: Boolean, default: false }
+    },
     walletBalance: { type: Number, default: 0 },
     rating: { type: Number, default: 0 },
     totalRatings: { type: Number, default: 0 },

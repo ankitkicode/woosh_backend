@@ -332,5 +332,77 @@ export const whatsappService = {
       console.error('Error sending WhatsApp support_ticket_created:', error);
       return false;
     }
+  },
+
+  /**
+   * Send SOS Alert
+   */
+  async sendSOSAlert(phoneNumber: string, userName: string, locationUrl: string): Promise<boolean> {
+    if (!META_WHATSAPP_TOKEN || !META_PHONE_NUMBER_ID) return false;
+    try {
+      const formattedNumber = phoneNumber.startsWith('+') ? phoneNumber.substring(1) : `91${phoneNumber}`;
+      await axios.post(
+        `https://graph.facebook.com/v19.0/${META_PHONE_NUMBER_ID}/messages`,
+        {
+          messaging_product: 'whatsapp',
+          to: formattedNumber,
+          type: 'template',
+          template: {
+            name: 'sos_alert',
+            language: { code: 'en' },
+            components: [
+              {
+                type: 'body',
+                parameters: [
+                  { type: 'text', text: userName },
+                  { type: 'text', text: locationUrl }
+                ],
+              },
+            ],
+          },
+        },
+        { headers: { Authorization: `Bearer ${META_WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' } }
+      );
+      return true;
+    } catch (error) {
+      console.error('Error sending WhatsApp sos_alert:', error);
+      return false;
+    }
+  },
+
+  /**
+   * Send Admin Alert for New Rider Registration
+   */
+  async sendAdminRiderRegistrationAlert(adminPhone: string, riderName: string, riderPhone: string): Promise<boolean> {
+    if (!META_WHATSAPP_TOKEN || !META_PHONE_NUMBER_ID) return false;
+    try {
+      const formattedNumber = adminPhone.startsWith('+') ? adminPhone.substring(1) : `91${adminPhone}`;
+      await axios.post(
+        `https://graph.facebook.com/v19.0/${META_PHONE_NUMBER_ID}/messages`,
+        {
+          messaging_product: 'whatsapp',
+          to: formattedNumber,
+          type: 'template',
+          template: {
+            name: 'admin_rider_registration',
+            language: { code: 'en_US' },
+            components: [
+              {
+                type: 'body',
+                parameters: [
+                  { type: 'text', text: riderName },
+                  { type: 'text', text: riderPhone }
+                ],
+              },
+            ],
+          },
+        },
+        { headers: { Authorization: `Bearer ${META_WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' } }
+      );
+      return true;
+    } catch (error) {
+      console.error('Error sending WhatsApp admin_rider_registration:', error);
+      return false;
+    }
   }
 };

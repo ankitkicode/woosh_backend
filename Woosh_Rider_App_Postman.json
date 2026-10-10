@@ -1,0 +1,631 @@
+{
+  "info": {
+    "name": "Woosh Rider App APIs",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000/api/v1",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "rideId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Auth",
+      "item": [
+        {
+          "name": "Send OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/send-otp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "send-otp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"phoneNumber\":\"9876543210\"}"
+            }
+          }
+        },
+        {
+          "name": "Verify OTP (Login)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if(jsonData.data && jsonData.data.accessToken) { pm.collectionVariables.set('token', jsonData.data.accessToken); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/verify-otp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "verify-otp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"phoneNumber\":\"9876543210\",\"otp\":\"1234\",\"role\":\"rider\"}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Profile & KYC",
+      "item": [
+        {
+          "name": "Get Profile",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rider/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rider",
+                "profile"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Profile",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rider/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rider",
+                "profile"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"name\":\"Rani\",\"gender\":\"female\",\"city\":\"Mumbai\",\"state\":\"Maharashtra\",\"vehicleNumber\":\"MH01AB1234\"}"
+            }
+          }
+        },
+        {
+          "name": "Submit KYC",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rider/kyc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rider",
+                "kyc"
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "aadhaar",
+                  "type": "file",
+                  "src": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Settings",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rider/settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rider",
+                "settings"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"language\":\"en\",\"acceptCashRides\":true,\"maxPickupDistance\":10,\"shareEveryTrip\":true}"
+            }
+          }
+        },
+        {
+          "name": "Add Emergency Contact",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rider/emergency-contacts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rider",
+                "emergency-contacts"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"name\":\"Papa\",\"phoneNumber\":\"9876543210\",\"relation\":\"Father\"}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Status & Tracking",
+      "item": [
+        {
+          "name": "Safety Checklist",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rider/safety-checklist",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rider",
+                "safety-checklist"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"helmetAvailable\":true,\"firstAidKitAvailable\":true,\"sanitaryPadsAvailable\":true,\"phoneBatteryCheck\":true,\"faceVerified\":true}"
+            }
+          }
+        },
+        {
+          "name": "Toggle Online",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rider/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rider",
+                "status"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update GPS Location",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tracking/location",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tracking",
+                "location"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"latitude\":19.076,\"longitude\":72.877}"
+            }
+          }
+        },
+        {
+          "name": "Trigger SOS",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tracking/sos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tracking",
+                "sos"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"rideId\":\"{{rideId}}\",\"latitude\":19.076,\"longitude\":72.877,\"address\":\"Bandra\"}"
+            }
+          }
+        },
+        {
+          "name": "Get High Demand Areas",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride/high-demand",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ride",
+                "high-demand"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Ride Lifecycle",
+      "item": [
+        {
+          "name": "Accept Ride",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride/{{rideId}}/accept",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ride",
+                "{{rideId}}",
+                "accept"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Reject Ride",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride/{{rideId}}/reject",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ride",
+                "{{rideId}}",
+                "reject"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Rider Arrived",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride/{{rideId}}/arrived",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ride",
+                "{{rideId}}",
+                "arrived"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Start Ride (OTP)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride/{{rideId}}/start",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ride",
+                "{{rideId}}",
+                "start"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"otp\":\"1234\"}"
+            }
+          }
+        },
+        {
+          "name": "Complete Ride",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride/{{rideId}}/complete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ride",
+                "{{rideId}}",
+                "complete"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"finalDistanceKm\":5,\"finalDurationMins\":15,\"dropLocation\":{\"latitude\":19.05,\"longitude\":72.84,\"address\":\"Dadar\"}}"
+            }
+          }
+        },
+        {
+          "name": "Confirm Cash Payment",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride/{{rideId}}/confirm-payment",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ride",
+                "{{rideId}}",
+                "confirm-payment"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Ride History",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride/history?filter=all&page=1&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ride",
+                "history"
+              ],
+              "query": [
+                {
+                  "key": "filter",
+                  "value": "all"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Earnings & Wallet",
+      "item": [
+        {
+          "name": "Get Earnings",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rider/earnings?period=weekly",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rider",
+                "earnings"
+              ],
+              "query": [
+                {
+                  "key": "period",
+                  "value": "weekly"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Wallet Transactions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payment/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payment",
+                "transactions"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

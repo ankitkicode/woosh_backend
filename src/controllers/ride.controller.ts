@@ -97,7 +97,7 @@ export const requestRide = asyncHandler(async (req: Request, res: Response) => {
       const firstRider = nearbyRiders[0];
       const riderUser = firstRider.user as any;
       initialAssignedRider = riderUser._id;
-      assignmentExpiresAt = new Date(Date.now() + 30000); // 30 seconds timeout
+      assignmentExpiresAt = new Date(Date.now() + 120000); // 2 minutes timeout
       notifiedRiders.push(riderUser._id);
     }
   } catch (err) {
@@ -206,6 +206,11 @@ export const acceptRide = asyncHandler(async (req: Request, res: Response) => {
   ride.status = RideStatus.ACCEPTED;
   await ride.save();
 
+  await RiderProfile.findOneAndUpdate(
+    { user: req.user?._id },
+    { $inc: { acceptedRides: 1, totalRideRequests: 1 } }
+  );
+
   // Notify passenger that rider accepted
   try {
     const passengerUser = ride.passenger as any;
@@ -251,6 +256,11 @@ export const rejectRide = asyncHandler(async (req: Request, res: Response) => {
     // Clear assignment so cron can pick it up immediately
     ride.assignmentExpiresAt = new Date(); 
     await ride.save();
+    
+    await RiderProfile.findOneAndUpdate(
+      { user: req.user?._id },
+      { $inc: { totalRideRequests: 1 } }
+    );
   }
 
   res.status(200).json(new ApiResponse(200, 'Ride rejected', null));
@@ -472,6 +482,7 @@ export const confirmPayment = asyncHandler(async (req: Request, res: Response) =
  * @desc    Passenger verifies Razorpay payment
  * @access  Protected (passenger)
  */
+
 export const verifyDigitalPayment = asyncHandler(async (req: Request, res: Response) => {
   const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
   
@@ -562,42 +573,7 @@ export const cancelRide = asyncHandler(async (req: Request, res: Response) => {
   res.status(200).json(new ApiResponse(200, 'Ride cancelled', ride));
 });
 
-/**
- * @route   POST /api/v1/ride/:id/sos
- * @desc    Trigger SOS for an active ride
- * @access  Protected
- */
-export const triggerSOS = asyncHandler(async (req: Request, res: Response) => {
-  const ride = await Ride.findById(req.params.id);
-  if (!ride) throw new ApiError(404, 'Ride not found');
 
-  const triggeredBy = ride.passenger.toString() === req.user?._id ? 'Passenger' : 'Rider';
-
-  // Mark ride with SOS alert (push to aiSafetyAlerts or similar, or just status)
-  ride.aiSafetyAlerts.push({
-    type: 'sos_triggered',
-    timestamp: new Date(),
-    resolved: false
-  });
-  await ride.save();
-
-  // Socket notification to admin
-  import('../sockets/tracking.socket').then(({ getIo }) => {
-    const ioInstance = getIo();
-    if (ioInstance) {
-      ioInstance.to('admin_room').emit('admin_sos_alert', {
-        rideId: ride._id,
-        triggeredBy,
-        userId: req.user?._id,
-        timestamp: new Date(),
-      });
-    }
-  });
-
-  // You can also add FCM to admin or SMS/WhatsApp to emergency contacts here
-  
-  res.status(200).json(new ApiResponse(200, 'SOS Triggered Successfully', ride));
-});
 
 /**
  * @route   PUT /api/v1/ride/:id/rate
@@ -661,9 +637,20 @@ export const getRideDetails = asyncHandler(async (req: Request, res: Response) =
 export const getRideHistory = asyncHandler(async (req: Request, res: Response) => {
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 10;
+  const filter = req.query.filter as string; // 'online_paid', 'cash', 'cancelled', 'all'
   const skip = (page - 1) * limit;
 
-  const query = { $or: [{ rider: req.user?._id }, { passenger: req.user?._id }] };
+  let query: any = { $or: [{ rider: req.user?._id }, { passenger: req.user?._id }] };
+
+  if (filter === 'online_paid') {
+    query.paymentMethod = 'upi';
+    query.status = RideStatus.PAYMENT_COMPLETED;
+  } else if (filter === 'cash') {
+    query.paymentMethod = 'cash';
+    query.status = RideStatus.COMPLETED;
+  } else if (filter === 'cancelled') {
+    query.status = { $in: [RideStatus.RIDER_CANCELLED, RideStatus.PASSENGER_CANCELLED] };
+  }
 
   const [rides, total] = await Promise.all([
     Ride.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit)
@@ -675,4 +662,46 @@ export const getRideHistory = asyncHandler(async (req: Request, res: Response) =
   res.status(200).json(new ApiResponse(200, 'Ride history fetched', {
     rides, page, limit, total, totalPages: Math.ceil(total / limit),
   }));
+});
+
+/**
+ * @route   GET /api/v1/ride/high-demand
+ * @desc    Get recent ride pickup locations to show high demand (heatmap) areas
+ * @access  Protected (rider)
+ */
+export const getHighDemandAreas = asyncHandler(async (req: Request, res: Response) => {
+  // Get rides from the last 12 hours
+  const hoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000);
+  
+  const rides = await Ride.find({
+    createdAt: { $gte: hoursAgo }
+  }).select('pickup.latitude pickup.longitude pickup.address');
+
+  // Group by address to consolidate nearby rides into a single location with higher weight
+  const demandMap = new Map<string, { latitude: number, longitude: number, address: string, weight: number }>();
+
+  rides.forEach(r => {
+    // Using a rounded coordinate (approx 1km radius) or address as a unique key for grouping
+    const latRound = (r.pickup.latitude).toFixed(2);
+    const lngRound = (r.pickup.longitude).toFixed(2);
+    const key = `${latRound},${lngRound}`; // groups rides within the same ~1km area
+    
+    if (demandMap.has(key)) {
+      const existing = demandMap.get(key)!;
+      existing.weight += 1; // Increase demand weight
+    } else {
+      demandMap.set(key, {
+        latitude: r.pickup.latitude,
+        longitude: r.pickup.longitude,
+        address: r.pickup.address || 'Unknown',
+        weight: 1
+      });
+    }
+  });
+
+  // Convert map to array and sort by weight (highest demand first)
+  const demandPoints = Array.from(demandMap.values()).sort((a, b) => b.weight - a.weight);
+
+  // If you only want the absolute highest demand location, you can take demandPoints[0]
+  res.status(200).json(new ApiResponse(200, 'High demand areas fetched', demandPoints));
 });

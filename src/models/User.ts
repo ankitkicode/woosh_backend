@@ -22,6 +22,7 @@ export interface IUser extends Document {
   gender?: Gender;
   dateOfBirth?: string;
   city?: string;
+  state?: string;
   emergencyContacts: IEmergencyContact[];
   isAadhaarVerified: boolean;
   isFaceVerified: boolean;
@@ -40,6 +41,7 @@ const userSchema = new Schema<IUser>(
     gender: { type: String, enum: Object.values(Gender) },
     dateOfBirth: { type: String, trim: true },
     city: { type: String, trim: true },
+    state: { type: String, trim: true },
     emergencyContacts: [
       {
         name: { type: String, trim: true },

@@ -6,6 +6,7 @@ export const updateRiderProfileSchema = z.object({
   gender: z.literal('female').optional(),
   dateOfBirth: z.string().trim().optional(),
   city: z.string().trim().optional(),
+  state: z.string().trim().optional(),
   vehicleNumber: z.string().trim().toUpperCase().min(4).max(15).optional(),
   vehicleModel: z.string().trim().max(50).optional(),
   vehicleColor: z.string().trim().max(30).optional(),
@@ -48,4 +49,20 @@ export const updatePassengerProfileSchema = z.object({
     name: z.string().trim().min(2).max(50),
     phoneNumber: z.string().trim().regex(/^[6-9]\d{9}$/, 'Invalid phone number'),
   })).max(5).optional(),
+});
+
+export const updateSettingsSchema = z.object({
+  preferences: z.object({
+    maxPickupDistance: z.number().min(1).max(50).optional(),
+    acceptCashRides: z.boolean().optional(),
+    rideRequestSound: z.boolean().optional(),
+    language: z.string().optional(),
+    payoutSchedule: z.enum(['WEEKLY', 'DAILY']).optional(),
+  }).optional(),
+  safetyPreferences: z.object({
+    shareEveryTrip: z.boolean().optional(),
+    stopRequestsAfter10PM: z.boolean().optional(),
+    rideCheck: z.boolean().optional(),
+    recordAudioOnSOS: z.boolean().optional(),
+  }).optional(),
 });

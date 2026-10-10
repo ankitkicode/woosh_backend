@@ -160,6 +160,27 @@ export const verifyOTP = asyncHandler(async (req: Request, res: Response) => {
     }
   }
 
+  // Notify Admin on New Rider Registration
+  if (isNewUser && (role === UserRole.RIDER || user.role === UserRole.RIDER || user.role === UserRole.BOTH)) {
+    const riderName = user.name || 'New Rider';
+    const primaryAdminPhone = "9011013612";
+    
+    // Send to primary hardcoded admin
+    whatsappService.sendAdminRiderRegistrationAlert(primaryAdminPhone, riderName, user.phoneNumber).catch(err => {
+      console.error('[WhatsApp] Error notifying primary admin about new rider:', err);
+    });
+
+    // Find other admins in DB to notify
+    const admins = await User.find({ role: { $in: [UserRole.ADMIN, UserRole.SUPER_ADMIN] } });
+    admins.forEach(admin => {
+      if (admin.phoneNumber && admin.phoneNumber !== primaryAdminPhone) {
+        whatsappService.sendAdminRiderRegistrationAlert(admin.phoneNumber, riderName, user.phoneNumber).catch(err => {
+          console.error('[WhatsApp] Error notifying admin about new rider:', err);
+        });
+      }
+    });
+  }
+
   // When generating the JWT, we use the role requested during login (passenger/rider)
   // so the app gets the correct scoped token, even if the DB says 'both'.
   const tokenPayload = { userId: user._id.toString(), role: role || user.role };

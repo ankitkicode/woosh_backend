@@ -20,7 +20,16 @@ import { whatsappService } from '../services/whatsapp.service';
 export const getRiderProfile = asyncHandler(async (req: Request, res: Response) => {
   const user = await User.findById(req.user?._id).select('-refreshToken');
   const riderProfile = await RiderProfile.findOne({ user: req.user?._id });
-  res.status(200).json(new ApiResponse(200, 'Profile fetched', { user, riderProfile }));
+  
+  let acceptanceRate = 0;
+  if (riderProfile && riderProfile.totalRideRequests > 0) {
+    acceptanceRate = Math.round((riderProfile.acceptedRides / riderProfile.totalRideRequests) * 100);
+  }
+
+  res.status(200).json(new ApiResponse(200, 'Profile fetched', { 
+    user, 
+    riderProfile: riderProfile ? { ...riderProfile.toObject(), acceptanceRate } : null 
+  }));
 });
 
 /**
@@ -29,7 +38,7 @@ export const getRiderProfile = asyncHandler(async (req: Request, res: Response) 
  * @access  Protected (rider)
  */
 export const updateRiderProfile = asyncHandler(async (req: Request, res: Response) => {
-  const { name, email, gender, dateOfBirth, city, vehicleNumber, vehicleModel, vehicleColor, areas, emergencyContacts } = req.body;
+  const { name, email, gender, dateOfBirth, city, state, vehicleNumber, vehicleModel, vehicleColor, areas, emergencyContacts } = req.body;
   
   const existingProfile = await RiderProfile.findOne({ user: req.user?._id });
   const isNewProfile = !existingProfile;
@@ -45,7 +54,7 @@ export const updateRiderProfile = asyncHandler(async (req: Request, res: Respons
 
   const user = await User.findByIdAndUpdate(
     req.user?._id, 
-    { name, email, gender, dateOfBirth, city, emergencyContacts: normalizedContacts }, 
+    { name, email, gender, dateOfBirth, city, state, emergencyContacts: normalizedContacts }, 
     { new: true, runValidators: true }
   ).select('-refreshToken');
 
@@ -239,36 +248,35 @@ export const toggleOnlineStatus = asyncHandler(async (req: Request, res: Respons
  * @access  Protected (rider)
  */
 export const getEarnings = asyncHandler(async (req: Request, res: Response) => {
-  const profile = await RiderProfile.findOne({ user: req.user?._id }).select('totalEarnings walletBalance totalRides rating');
+  const profile = await RiderProfile.findOne({ user: req.user?._id }).select('totalEarnings walletBalance totalRides rating onlineHours');
   if (!profile) throw new ApiError(404, 'Rider profile not found');
 
   const recentTransactions = await WalletTransaction.find({ user: req.user?._id })
     .sort({ createdAt: -1 }).limit(20);
 
-  // Calculate daily and monthly earnings from Rides
   const now = new Date();
   const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (now.getDay() === 0 ? 6 : now.getDay() - 1));
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-  const [dailyResult, monthlyResult] = await Promise.all([
+  const riderId = new mongoose.Types.ObjectId(req.user?._id as string);
+
+  const [dailyResult, weeklyResult, monthlyResult] = await Promise.all([
     Ride.aggregate([
-      { 
-        $match: { 
-          rider: new mongoose.Types.ObjectId(req.user?._id), 
-          status: { $in: [RideStatus.COMPLETED, RideStatus.PAYMENT_COMPLETED] },
-          rideEndedAt: { $gte: startOfDay }
-        } 
-      },
+      { $match: { rider: riderId, status: { $in: [RideStatus.COMPLETED, RideStatus.PAYMENT_COMPLETED] }, rideEndedAt: { $gte: startOfDay } } },
       { $group: { _id: null, total: { $sum: { $ifNull: ["$riderEarnings", "$finalFare"] } }, count: { $sum: 1 } } }
     ]),
     Ride.aggregate([
-      { 
-        $match: { 
-          rider: req.user?._id, 
-          status: { $in: [RideStatus.COMPLETED, RideStatus.PAYMENT_COMPLETED] },
-          rideEndedAt: { $gte: startOfMonth }
-        } 
-      },
+      { $match: { rider: riderId, status: { $in: [RideStatus.COMPLETED, RideStatus.PAYMENT_COMPLETED] }, rideEndedAt: { $gte: startOfWeek } } },
+      { $group: { 
+          _id: { $dayOfWeek: "$rideEndedAt" }, 
+          total: { $sum: { $ifNull: ["$riderEarnings", "$finalFare"] } },
+          count: { $sum: 1 }
+        }
+      }
+    ]),
+    Ride.aggregate([
+      { $match: { rider: riderId, status: { $in: [RideStatus.COMPLETED, RideStatus.PAYMENT_COMPLETED] }, rideEndedAt: { $gte: startOfMonth } } },
       { $group: { _id: null, total: { $sum: { $ifNull: ["$riderEarnings", "$finalFare"] } }, count: { $sum: 1 } } }
     ])
   ]);
@@ -278,16 +286,36 @@ export const getEarnings = asyncHandler(async (req: Request, res: Response) => {
   const monthlyEarnings = monthlyResult[0]?.total || 0;
   const monthlyRides = monthlyResult[0]?.count || 0;
 
+  let weeklyEarnings = 0;
+  let weeklyRides = 0;
+  const dailyBreakdown = [0, 0, 0, 0, 0, 0, 0];
+  
+  weeklyResult.forEach(item => {
+    const dayIndex = item._id === 1 ? 6 : item._id - 2;
+    if(dayIndex >= 0 && dayIndex <= 6) {
+      dailyBreakdown[dayIndex] = item.total;
+    }
+    weeklyEarnings += item.total;
+    weeklyRides += item.count;
+  });
+
+  const cashDues = profile.walletBalance < 0 ? Math.abs(profile.walletBalance) : 0;
+
   res.status(200).json(new ApiResponse(200, 'Earnings fetched', {
     summary: { 
       totalEarnings: profile.totalEarnings, 
       walletBalance: profile.walletBalance, 
+      cashDues,
+      onlineHours: profile.onlineHours,
       totalRides: profile.totalRides, 
       rating: profile.rating,
       todayEarnings,
       todayRides,
+      weeklyEarnings,
+      weeklyRides,
       monthlyEarnings,
-      monthlyRides
+      monthlyRides,
+      dailyBreakdown
     },
     recentTransactions,
   }));
@@ -350,6 +378,76 @@ export const requestPayout = asyncHandler(async (req: Request, res: Response) =>
  * @desc    Add a bank account
  * @access  Protected (rider)
  */
+export const updateRiderSettings = asyncHandler(async (req: Request, res: Response) => {
+  const { preferences, safetyPreferences } = req.body;
+  
+  const updateData: any = {};
+  if (preferences) {
+    for (const [key, value] of Object.entries(preferences)) {
+      updateData[`preferences.${key}`] = value;
+    }
+  }
+  if (safetyPreferences) {
+    for (const [key, value] of Object.entries(safetyPreferences)) {
+      updateData[`safetyPreferences.${key}`] = value;
+    }
+  }
+
+  const profile = await RiderProfile.findOneAndUpdate(
+    { user: req.user?._id },
+    { $set: updateData },
+    { new: true, runValidators: true }
+  );
+
+  if (!profile) throw new ApiError(404, 'Rider profile not found');
+
+  res.status(200).json(new ApiResponse(200, 'Settings updated successfully', profile));
+});
+
+export const addEmergencyContact = asyncHandler(async (req: Request, res: Response) => {
+  const { name, phoneNumber } = req.body;
+  if (!name || !phoneNumber) throw new ApiError(400, 'Name and phone number are required');
+
+  const user = await User.findById(req.user?._id);
+  if (!user) throw new ApiError(404, 'User not found');
+  
+  if (user.emergencyContacts.length >= 5) {
+    throw new ApiError(400, 'Maximum 5 emergency contacts allowed');
+  }
+
+  user.emergencyContacts.push({ name, phoneNumber });
+  await user.save();
+  
+  res.status(201).json(new ApiResponse(201, 'Emergency contact added', user.emergencyContacts));
+});
+
+export const updateEmergencyContact = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { name, phoneNumber } = req.body;
+
+  const user = await User.findOneAndUpdate(
+    { _id: req.user?._id, 'emergencyContacts._id': id },
+    { $set: { 'emergencyContacts.$.name': name, 'emergencyContacts.$.phoneNumber': phoneNumber } },
+    { new: true }
+  );
+
+  if (!user) throw new ApiError(404, 'Contact not found');
+
+  res.status(200).json(new ApiResponse(200, 'Emergency contact updated', user.emergencyContacts));
+});
+
+export const deleteEmergencyContact = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+
+  const user = await User.findByIdAndUpdate(
+    req.user?._id,
+    { $pull: { emergencyContacts: { _id: id } } as any },
+    { new: true }
+  );
+
+  res.status(200).json(new ApiResponse(200, 'Emergency contact deleted', user?.emergencyContacts));
+});
+
 export const addBankAccount = asyncHandler(async (req: Request, res: Response) => {
   const { accountHolderName, accountNumber, ifscCode, bankName, isPrimary } = req.body;
   if (!accountHolderName || !accountNumber || !ifscCode || !bankName) {

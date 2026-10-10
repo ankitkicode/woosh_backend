@@ -6,9 +6,10 @@ import { validate } from '../middlewares/validate.middleware';
 import {
   getRiderProfile, updateRiderProfile, submitKYC,
   getKYCStatus, toggleOnlineStatus, getEarnings, updateSafetyChecklist, uploadProfileImage, requestPayout,
-  addBankAccount, getBankAccounts, setPrimaryBankAccount
+  addBankAccount, getBankAccounts, setPrimaryBankAccount, updateRiderSettings,
+  addEmergencyContact, updateEmergencyContact, deleteEmergencyContact
 } from '../controllers/rider.controller';
-import { updateRiderProfileSchema } from '../validations/rider.validation';
+import { updateRiderProfileSchema, updateSettingsSchema } from '../validations/rider.validation';
 
 const router = Router();
 
@@ -30,6 +31,7 @@ router.post('/kyc', upload.fields([
 ]), submitKYC);
 router.get('/kyc/status', getKYCStatus);
 router.put('/safety-checklist', updateSafetyChecklist);
+router.put('/settings', validate(updateSettingsSchema), updateRiderSettings);
 router.put('/status', kycGate, toggleOnlineStatus);
 router.get('/earnings', getEarnings);
 router.post('/wallet/payout', requestPayout);
@@ -37,6 +39,10 @@ router.post('/wallet/payout', requestPayout);
 router.post('/bank-accounts', addBankAccount);
 router.get('/bank-accounts', getBankAccounts);
 router.put('/bank-accounts/:id/primary', setPrimaryBankAccount);
+
+router.post('/emergency-contacts', addEmergencyContact);
+router.put('/emergency-contacts/:id', updateEmergencyContact);
+router.delete('/emergency-contacts/:id', deleteEmergencyContact);
 
 
 
