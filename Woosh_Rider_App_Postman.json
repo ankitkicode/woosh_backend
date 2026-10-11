@@ -430,6 +430,76 @@
       "name": "5. Ride Management Lifecycle",
       "item": [
         {
+          "name": "Get Active / Ongoing Ride (Restore on App Open)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride/active?latitude=23.2501&longitude=77.4320",
+              "host": ["{{baseUrl}}"],
+              "path": ["ride", "active"],
+              "query": [
+                {
+                  "key": "latitude",
+                  "value": "23.2501",
+                  "description": "Optional: Rider live GPS latitude for real-time pickup ETA & distance"
+                },
+                {
+                  "key": "longitude",
+                  "value": "77.4320",
+                  "description": "Optional: Rider live GPS longitude for real-time pickup ETA & distance"
+                }
+              ]
+            },
+            "description": "Fetches ongoing active ride for rider or passenger when app opens or resumes from background, returning pickup distanceKm and etaMinutes."
+          }
+        },
+        {
+          "name": "Request Ride (Passenger Simulator to Test Rider)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if(jsonData.data && jsonData.data._id) {",
+                  "    pm.collectionVariables.set('rideId', jsonData.data._id);",
+                  "    console.log('rideId auto-set:', jsonData.data._id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride/request",
+              "host": ["{{baseUrl}}"],
+              "path": ["ride", "request"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pickup\": {\n    \"latitude\": 23.249456,\n    \"longitude\": 77.4350136,\n    \"address\": \"7, ward 43, Old Subhash Nagar Colony\"\n  },\n  \"drop\": {\n    \"latitude\": 23.232456,\n    \"longitude\": 77.4120136,\n    \"address\": \"Bhopal Junction Railway Station\"\n  },\n  \"paymentMethod\": \"cash\"\n}"
+            },
+            "description": "Simulates passenger requesting a ride, calculates pickup distanceKm & etaMinutes, notifies assigned rider, and sets {{rideId}} automatically."
+          }
+        },
+        {
           "name": "Get Ride History",
           "request": {
             "method": "GET",
