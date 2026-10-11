@@ -340,7 +340,8 @@ export const whatsappService = {
   async sendSOSAlert(phoneNumber: string, userName: string, locationUrl: string): Promise<boolean> {
     if (!META_WHATSAPP_TOKEN || !META_PHONE_NUMBER_ID) return false;
     try {
-      const formattedNumber = phoneNumber.startsWith('+') ? phoneNumber.substring(1) : `91${phoneNumber}`;
+      const cleanPhone = phoneNumber.replace(/\D/g, '');
+      const formattedNumber = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
       await axios.post(
         `https://graph.facebook.com/v19.0/${META_PHONE_NUMBER_ID}/messages`,
         {
@@ -364,8 +365,8 @@ export const whatsappService = {
         { headers: { Authorization: `Bearer ${META_WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' } }
       );
       return true;
-    } catch (error) {
-      console.error('Error sending WhatsApp sos_alert:', error);
+    } catch (error: any) {
+      console.error('Error sending WhatsApp sos_alert:', error.response?.data || error.message);
       return false;
     }
   },

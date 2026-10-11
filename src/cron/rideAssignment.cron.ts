@@ -50,11 +50,30 @@ export const startRideAssignmentCron = () => {
           // }
 
           // Socket IO fallback
-          import('../sockets/tracking.socket').then(({ ioInstance }) => {
+          import('../sockets/tracking.socket').then(async ({ ioInstance }) => {
             if (ioInstance) {
+              let pickupEstimate: any = null;
+              if (nextRider?.currentLocation?.coordinates) {
+                const { getDistanceInKm } = await import('../utils/fareCalculator');
+                const dist = getDistanceInKm(nextRider.currentLocation.coordinates[1], nextRider.currentLocation.coordinates[0], ride.pickup.latitude, ride.pickup.longitude);
+                const mins = Math.max(1, Math.ceil((dist / 25) * 60));
+                pickupEstimate = {
+                  distanceKm: dist,
+                  etaMinutes: mins,
+                  formattedDistance: `${dist} km`,
+                  formattedEta: `${mins} mins`
+                };
+              }
+
               ioInstance.to(`rider:${riderUser._id}`).emit('new_ride_request', {
                 rideId: ride._id,
-                pickup: ride.pickup,
+                pickup: {
+                  ...ride.pickup,
+                  distanceKm: pickupEstimate?.distanceKm ?? null,
+                  etaMinutes: pickupEstimate?.etaMinutes ?? null,
+                  formattedDistance: pickupEstimate?.formattedDistance ?? null,
+                  formattedEta: pickupEstimate?.formattedEta ?? null
+                },
                 drop: ride.drop,
                 fare: ride.estimatedFare,
                 distanceKm: ride.distanceKm,

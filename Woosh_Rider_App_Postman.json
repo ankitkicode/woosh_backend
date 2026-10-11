@@ -1,6 +1,7 @@
 {
   "info": {
     "name": "Woosh Rider App APIs",
+    "description": "Complete Postman collection for Woosh Rider App including Auth, KYC, Status, Ride Lifecycle, Earnings, Monthly Statements, Dynamic PDF Export, Wallet, Cash Dues, Bank Accounts, and Support.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -23,14 +24,19 @@
       "key": "bankAccountId",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "contactId",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
     {
-      "name": "1. Auth",
+      "name": "1. Authentication & Login",
       "item": [
         {
-          "name": "Send OTP",
+          "name": "Send OTP (Rider)",
           "request": {
             "method": "POST",
             "header": [
@@ -41,29 +47,27 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/auth/send-otp",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "auth",
-                "send-otp"
-              ]
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "send-otp"]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"phoneNumber\":\"9876543210\"}"
+              "raw": "{\n  \"phoneNumber\": \"9876543210\"\n}"
             }
           }
         },
         {
-          "name": "Verify OTP (Login)",
+          "name": "Verify OTP & Auto-Set Token",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
                   "var jsonData = pm.response.json();",
-                  "if(jsonData.data && jsonData.data.accessToken) { pm.collectionVariables.set('token', jsonData.data.accessToken); }"
+                  "if(jsonData.data && jsonData.data.accessToken) {",
+                  "    pm.collectionVariables.set('token', jsonData.data.accessToken);",
+                  "    console.log('Rider Token set successfully:', jsonData.data.accessToken);",
+                  "}"
                 ]
               }
             }
@@ -78,27 +82,22 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/auth/verify-otp",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "auth",
-                "verify-otp"
-              ]
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "verify-otp"]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"phoneNumber\":\"9876543210\",\"otp\":\"1234\",\"role\":\"rider\"}"
+              "raw": "{\n  \"phoneNumber\": \"9876543210\",\n  \"otp\": \"1234\",\n  \"role\": \"rider\",\n  \"deviceId\": \"device_android_99\",\n  \"fcmToken\": \"fcm_token_example_rider\"\n}"
             }
           }
         }
       ]
     },
     {
-      "name": "2. Profile & KYC",
+      "name": "2. Profile & KYC Onboarding",
       "item": [
         {
-          "name": "Get Profile",
+          "name": "Get Rider Profile",
           "request": {
             "method": "GET",
             "header": [
@@ -109,18 +108,13 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/rider/profile",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "rider",
-                "profile"
-              ]
+              "host": ["{{baseUrl}}"],
+              "path": ["rider", "profile"]
             }
           }
         },
         {
-          "name": "Update Profile",
+          "name": "Update Rider Profile & Vehicle",
           "request": {
             "method": "PUT",
             "header": [
@@ -135,22 +129,44 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/rider/profile",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "rider",
-                "profile"
-              ]
+              "host": ["{{baseUrl}}"],
+              "path": ["rider", "profile"]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"name\":\"Rani\",\"gender\":\"female\",\"city\":\"Mumbai\",\"state\":\"Maharashtra\",\"vehicleNumber\":\"MH01AB1234\"}"
+              "raw": "{\n  \"vehicleNumber\": \"MH12AB1234\",\n  \"vehicleModel\": \"Honda Activa 6G\",\n  \"vehicleColor\": \"Black\",\n  \"areas\": [\"Andheri East\", \"Bandra West\", \"Juhu\"]\n}"
             }
           }
         },
         {
-          "name": "Submit KYC",
+          "name": "Upload Profile Photo",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rider/profile-image",
+              "host": ["{{baseUrl}}"],
+              "path": ["rider", "profile-image"]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "image",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Submit 9 KYC Documents",
           "request": {
             "method": "POST",
             "header": [
@@ -161,28 +177,44 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/rider/kyc",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "rider",
-                "kyc"
-              ]
+              "host": ["{{baseUrl}}"],
+              "path": ["rider", "kyc"]
             },
             "body": {
               "mode": "formdata",
               "formdata": [
-                {
-                  "key": "aadhaar",
-                  "type": "file",
-                  "src": ""
-                }
+                { "key": "aadhaar", "type": "file", "src": [] },
+                { "key": "driving_license", "type": "file", "src": [] },
+                { "key": "pan", "type": "file", "src": [] },
+                { "key": "rc_book", "type": "file", "src": [] },
+                { "key": "vehicle_insurance", "type": "file", "src": [] },
+                { "key": "puc", "type": "file", "src": [] },
+                { "key": "police_verification", "type": "file", "src": [] },
+                { "key": "face_verification", "type": "file", "src": [] },
+                { "key": "selfie_verification", "type": "file", "src": [] }
               ]
             }
           }
         },
         {
-          "name": "Update Settings",
+          "name": "Get KYC Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rider/kyc/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["rider", "kyc", "status"]
+            }
+          }
+        },
+        {
+          "name": "Update Rider Preferences & Settings",
           "request": {
             "method": "PUT",
             "header": [
@@ -197,17 +229,42 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/rider/settings",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "rider",
-                "settings"
-              ]
+              "host": ["{{baseUrl}}"],
+              "path": ["rider", "settings"]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"language\":\"en\",\"acceptCashRides\":true,\"maxPickupDistance\":10,\"shareEveryTrip\":true}"
+              "raw": "{\n  \"preferences\": {\n    \"maxPickupDistance\": 5,\n    \"acceptCashRides\": true,\n    \"rideRequestSound\": true,\n    \"language\": \"Hindi\",\n    \"payoutSchedule\": \"WEEKLY\"\n  },\n  \"safetyPreferences\": {\n    \"shareEveryTrip\": true,\n    \"stopRequestsAfter10PM\": false,\n    \"rideCheck\": true,\n    \"recordAudioOnSOS\": true\n  }\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Daily Safety & Emergency Contacts",
+      "item": [
+        {
+          "name": "Submit Daily Safety Checklist",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rider/safety-checklist",
+              "host": ["{{baseUrl}}"],
+              "path": ["rider", "safety-checklist"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"helmetAvailable\": true,\n  \"firstAidKitAvailable\": true,\n  \"sanitaryPadsAvailable\": true,\n  \"phoneBatteryCheck\": true,\n  \"faceVerified\": true\n}"
             }
           }
         },
@@ -227,27 +284,17 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/rider/emergency-contacts",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "rider",
-                "emergency-contacts"
-              ]
+              "host": ["{{baseUrl}}"],
+              "path": ["rider", "emergency-contacts"]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"name\":\"Papa\",\"phoneNumber\":\"9876543210\",\"relation\":\"Father\"}"
+              "raw": "{\n  \"name\": \"Family Contact\",\n  \"phoneNumber\": \"9876543210\"\n}"
             }
           }
-        }
-      ]
-    },
-    {
-      "name": "3. Status & Tracking",
-      "item": [
+        },
         {
-          "name": "Safety Checklist",
+          "name": "Update Emergency Contact",
           "request": {
             "method": "PUT",
             "header": [
@@ -261,23 +308,40 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/rider/safety-checklist",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "rider",
-                "safety-checklist"
-              ]
+              "raw": "{{baseUrl}}/rider/emergency-contacts/{{contactId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["rider", "emergency-contacts", "{{contactId}}"]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"helmetAvailable\":true,\"firstAidKitAvailable\":true,\"sanitaryPadsAvailable\":true,\"phoneBatteryCheck\":true,\"faceVerified\":true}"
+              "raw": "{\n  \"name\": \"Emergency Contact Updated\",\n  \"phoneNumber\": \"9123456789\"\n}"
             }
           }
         },
         {
-          "name": "Toggle Online",
+          "name": "Delete Emergency Contact",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rider/emergency-contacts/{{contactId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["rider", "emergency-contacts", "{{contactId}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Status, GPS Tracking & Safety SOS",
+      "item": [
+        {
+          "name": "Toggle Online / Offline Status",
           "request": {
             "method": "PUT",
             "header": [
@@ -288,20 +352,15 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/rider/status",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "rider",
-                "status"
-              ]
+              "host": ["{{baseUrl}}"],
+              "path": ["rider", "status"]
             }
           }
         },
         {
-          "name": "Update GPS Location",
+          "name": "Update Live GPS Location",
           "request": {
-            "method": "PUT",
+            "method": "POST",
             "header": [
               {
                 "key": "Authorization",
@@ -313,23 +372,18 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/tracking/location",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "tracking",
-                "location"
-              ]
+              "raw": "{{baseUrl}}/tracking/update-location",
+              "host": ["{{baseUrl}}"],
+              "path": ["tracking", "update-location"]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"latitude\":19.076,\"longitude\":72.877}"
+              "raw": "{\n  \"latitude\": 19.0760,\n  \"longitude\": 72.8777,\n  \"heading\": 90,\n  \"speed\": 35\n}"
             }
           }
         },
         {
-          "name": "Trigger SOS",
+          "name": "Trigger SOS Emergency Alert (SMS + WhatsApp)",
           "request": {
             "method": "POST",
             "header": [
@@ -344,22 +398,17 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/tracking/sos",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "tracking",
-                "sos"
-              ]
+              "host": ["{{baseUrl}}"],
+              "path": ["tracking", "sos"]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"rideId\":\"{{rideId}}\",\"latitude\":19.076,\"longitude\":72.877,\"address\":\"Bandra\"}"
+              "raw": "{\n  \"latitude\": 19.0760,\n  \"longitude\": 72.8777,\n  \"address\": \"Western Express Highway, Andheri, Mumbai\"\n}"
             }
           }
         },
         {
-          "name": "Get High Demand Areas",
+          "name": "Get High Demand Hotspots Heatmap",
           "request": {
             "method": "GET",
             "header": [
@@ -370,21 +419,55 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/ride/high-demand",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "ride",
-                "high-demand"
-              ]
+              "host": ["{{baseUrl}}"],
+              "path": ["ride", "high-demand"]
             }
           }
         }
       ]
     },
     {
-      "name": "4. Ride Lifecycle",
+      "name": "5. Ride Management Lifecycle",
       "item": [
+        {
+          "name": "Get Ride History",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride/history?page=1&limit=20&month=2026-09",
+              "host": ["{{baseUrl}}"],
+              "path": ["ride", "history"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "month", "value": "2026-09" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Ride Details",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride/{{rideId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["ride", "{{rideId}}"]
+            }
+          }
+        },
         {
           "name": "Accept Ride",
           "request": {
@@ -397,14 +480,8 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/ride/{{rideId}}/accept",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "ride",
-                "{{rideId}}",
-                "accept"
-              ]
+              "host": ["{{baseUrl}}"],
+              "path": ["ride", "{{rideId}}", "accept"]
             }
           }
         },
@@ -420,19 +497,13 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/ride/{{rideId}}/reject",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "ride",
-                "{{rideId}}",
-                "reject"
-              ]
+              "host": ["{{baseUrl}}"],
+              "path": ["ride", "{{rideId}}", "reject"]
             }
           }
         },
         {
-          "name": "Rider Arrived",
+          "name": "Rider Arrived at Pickup",
           "request": {
             "method": "PUT",
             "header": [
@@ -443,19 +514,13 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/ride/{{rideId}}/arrived",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "ride",
-                "{{rideId}}",
-                "arrived"
-              ]
+              "host": ["{{baseUrl}}"],
+              "path": ["ride", "{{rideId}}", "arrived"]
             }
           }
         },
         {
-          "name": "Start Ride (OTP)",
+          "name": "Start Ride (Verify Passenger OTP)",
           "request": {
             "method": "PUT",
             "header": [
@@ -470,23 +535,51 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/ride/{{rideId}}/start",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "ride",
-                "{{rideId}}",
-                "start"
-              ]
+              "host": ["{{baseUrl}}"],
+              "path": ["ride", "{{rideId}}", "start"]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"otp\":\"1234\"}"
+              "raw": "{\n  \"otp\": \"1234\"\n}"
             }
           }
         },
         {
-          "name": "Complete Ride",
+          "name": "Complete Ride (Calculates Commission)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride/{{rideId}}/complete",
+              "host": ["{{baseUrl}}"],
+              "path": ["ride", "{{rideId}}", "complete"]
+            }
+          }
+        },
+        {
+          "name": "Confirm Cash Payment Collected",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride/{{rideId}}/confirm-payment",
+              "host": ["{{baseUrl}}"],
+              "path": ["ride", "{{rideId}}", "confirm-payment"]
+            }
+          }
+        },
+        {
+          "name": "Cancel Ride (Rider)",
           "request": {
             "method": "PUT",
             "header": [
@@ -500,88 +593,48 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/ride/{{rideId}}/complete",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "ride",
-                "{{rideId}}",
-                "complete"
-              ]
+              "raw": "{{baseUrl}}/ride/{{rideId}}/cancel",
+              "host": ["{{baseUrl}}"],
+              "path": ["ride", "{{rideId}}", "cancel"]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"finalDistanceKm\":5,\"finalDurationMins\":15,\"dropLocation\":{\"latitude\":19.05,\"longitude\":72.84,\"address\":\"Dadar\"}}"
+              "raw": "{\n  \"reason\": \"Passenger not responding to calls\"\n}"
             }
           }
         },
         {
-          "name": "Confirm Cash Payment",
+          "name": "Rate Passenger",
           "request": {
             "method": "PUT",
             "header": [
               {
                 "key": "Authorization",
                 "value": "Bearer {{token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/ride/{{rideId}}/confirm-payment",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "ride",
-                "{{rideId}}",
-                "confirm-payment"
-              ]
-            }
-          }
-        },
-        {
-          "name": "Ride History",
-          "request": {
-            "method": "GET",
-            "header": [
+              },
               {
-                "key": "Authorization",
-                "value": "Bearer {{token}}"
+                "key": "Content-Type",
+                "value": "application/json"
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/ride/history?filter=all&page=1&limit=10",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "ride",
-                "history"
-              ],
-              "query": [
-                {
-                  "key": "filter",
-                  "value": "all"
-                },
-                {
-                  "key": "page",
-                  "value": "1"
-                },
-                {
-                  "key": "limit",
-                  "value": "10"
-                }
-              ]
+              "raw": "{{baseUrl}}/ride/{{rideId}}/rate",
+              "host": ["{{baseUrl}}"],
+              "path": ["ride", "{{rideId}}", "rate"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rating\": 5,\n  \"comment\": \"Polite and punctual passenger\"\n}"
             }
           }
         }
       ]
     },
     {
-      "name": "5. Earnings & Wallet",
+      "name": "6. Earnings & Monthly Statement",
       "item": [
         {
-          "name": "Get Earnings",
+          "name": "Get Real-time Earnings Summary",
           "request": {
             "method": "GET",
             "header": [
@@ -592,24 +645,16 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/rider/earnings?period=weekly",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "rider",
-                "earnings"
-              ],
+              "host": ["{{baseUrl}}"],
+              "path": ["rider", "earnings"],
               "query": [
-                {
-                  "key": "period",
-                  "value": "weekly"
-                }
+                { "key": "period", "value": "weekly" }
               ]
             }
           }
         },
         {
-          "name": "Wallet Transactions",
+          "name": "Monthly Statement (Matches Screenshot View)",
           "request": {
             "method": "GET",
             "header": [
@@ -619,19 +664,180 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/payment/transactions",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "payment",
-                "transactions"
+              "raw": "{{baseUrl}}/rider/statement?month=2026-09",
+              "host": ["{{baseUrl}}"],
+              "path": ["rider", "statement"],
+              "query": [
+                { "key": "month", "value": "2026-09" }
               ]
             }
           }
         },
         {
-          "name": "Get Bank Accounts",
+          "name": "Download Monthly Statement PDF (Dynamic Table)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rider/statement/pdf?month=2026-09",
+              "host": ["{{baseUrl}}"],
+              "path": ["rider", "statement", "pdf"],
+              "query": [
+                { "key": "month", "value": "2026-09" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Wallet, Cash Dues & Payouts",
+      "item": [
+        {
+          "name": "Get Wallet Balance & Cash Dues",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payment/wallet",
+              "host": ["{{baseUrl}}"],
+              "path": ["payment", "wallet"]
+            }
+          }
+        },
+        {
+          "name": "Pay Cash Dues - Create Razorpay Order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payment/cash-dues/order",
+              "host": ["{{baseUrl}}"],
+              "path": ["payment", "cash-dues", "order"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 150\n}"
+            }
+          }
+        },
+        {
+          "name": "Pay Cash Dues - Verify Razorpay Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payment/cash-dues/verify",
+              "host": ["{{baseUrl}}"],
+              "path": ["payment", "cash-dues", "verify"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"razorpay_order_id\": \"order_cashdues_placeholder\",\n  \"razorpay_payment_id\": \"pay_cashdues_placeholder\",\n  \"razorpay_signature\": \"sig_cashdues_placeholder\",\n  \"amount\": 150\n}"
+            }
+          }
+        },
+        {
+          "name": "Wallet Topup - Create Razorpay Order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payment/wallet/topup/order",
+              "host": ["{{baseUrl}}"],
+              "path": ["payment", "wallet", "topup", "order"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 500\n}"
+            }
+          }
+        },
+        {
+          "name": "Wallet Topup - Verify Razorpay Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payment/wallet/topup/verify",
+              "host": ["{{baseUrl}}"],
+              "path": ["payment", "wallet", "topup", "verify"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"razorpay_order_id\": \"order_topup_placeholder\",\n  \"razorpay_payment_id\": \"pay_topup_placeholder\",\n  \"razorpay_signature\": \"sig_topup_placeholder\",\n  \"amount\": 500\n}"
+            }
+          }
+        },
+        {
+          "name": "Get Wallet Transactions History",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payment/transactions?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["payment", "transactions"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Saved Bank Accounts",
           "request": {
             "method": "GET",
             "header": [
@@ -642,13 +848,8 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/rider/bank-accounts",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "rider",
-                "bank-accounts"
-              ]
+              "host": ["{{baseUrl}}"],
+              "path": ["rider", "bank-accounts"]
             }
           }
         },
@@ -668,17 +869,12 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/rider/bank-accounts",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "rider",
-                "bank-accounts"
-              ]
+              "host": ["{{baseUrl}}"],
+              "path": ["rider", "bank-accounts"]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"accountName\":\"Ankit Kumar\",\"accountNumber\":\"123456789012\",\"ifscCode\":\"HDFC0001234\",\"bankName\":\"HDFC Bank\"}"
+              "raw": "{\n  \"accountHolderName\": \"Ankit Kumar\",\n  \"accountNumber\": \"123456789012\",\n  \"ifscCode\": \"HDFC0001234\",\n  \"bankName\": \"HDFC Bank\",\n  \"isPrimary\": true\n}"
             }
           }
         },
@@ -694,15 +890,59 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/rider/bank-accounts/{{bankAccountId}}/primary",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "rider",
-                "bank-accounts",
-                "{{bankAccountId}}",
-                "primary"
-              ]
+              "host": ["{{baseUrl}}"],
+              "path": ["rider", "bank-accounts", "{{bankAccountId}}", "primary"]
+            }
+          }
+        },
+        {
+          "name": "Request Payout to Bank Account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rider/wallet/payout",
+              "host": ["{{baseUrl}}"],
+              "path": ["rider", "wallet", "payout"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 500\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Rider Support & Help",
+      "item": [
+        {
+          "name": "Submit Rider Support Ticket",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rider-support",
+              "host": ["{{baseUrl}}"],
+              "path": ["rider-support"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Ankit Kumar\",\n  \"phone\": \"9876543210\",\n  \"email\": \"rider@woosh.com\",\n  \"subject\": \"Commission query\",\n  \"message\": \"Need assistance regarding commission calculation on my monthly statement.\"\n}"
             }
           }
         }

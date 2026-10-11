@@ -9,6 +9,7 @@ import {
   addBankAccount, getBankAccounts, setPrimaryBankAccount, updateRiderSettings,
   addEmergencyContact, updateEmergencyContact, deleteEmergencyContact
 } from '../controllers/rider.controller';
+import { getMonthlyStatement, downloadStatementPdf } from '../controllers/payment.controller';
 import { updateRiderProfileSchema, updateSettingsSchema } from '../validations/rider.validation';
 
 const router = Router();
@@ -34,6 +35,8 @@ router.put('/safety-checklist', updateSafetyChecklist);
 router.put('/settings', validate(updateSettingsSchema), updateRiderSettings);
 router.put('/status', kycGate, toggleOnlineStatus);
 router.get('/earnings', getEarnings);
+router.get('/statement', getMonthlyStatement);
+router.get('/statement/pdf', downloadStatementPdf);
 router.post('/wallet/payout', requestPayout);
 
 router.post('/bank-accounts', addBankAccount);

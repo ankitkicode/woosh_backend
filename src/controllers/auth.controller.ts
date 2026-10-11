@@ -29,7 +29,6 @@ export const verifyGender = asyncHandler(async (req: Request, res: Response) => 
 
   try {
     const result = await FaceService.verifyGender(req.file.path);
-    
     // Clean up uploaded file after analysis
     fs.unlinkSync(req.file.path);
 
@@ -62,7 +61,7 @@ export const sendOTP = asyncHandler(async (req: Request, res: Response) => {
   console.log(`[sendOTP] Role: ${role}, Action: ${action}, Phone: ${phoneNumber}`);
   if (role === UserRole.RIDER) {
     const existingUser = await User.findOne({ phoneNumber });
-    
+
     if (action === 'login') {
       if (!existingUser || (existingUser.role !== UserRole.RIDER && existingUser.role !== UserRole.BOTH)) {
         throw new ApiError(403, 'Account not found. Please register as a rider first.');
@@ -83,10 +82,10 @@ export const sendOTP = asyncHandler(async (req: Request, res: Response) => {
   await OTP.deleteMany({ phoneNumber });
 
 
-  
+
 
   let otp = generateOTP(6);
-  
+
   if (role === UserRole.RIDER && phoneNumber === '9876543210') {
     otp = '123456';
   } else if (role === UserRole.PASSENGER && phoneNumber === '9876543211') {
@@ -164,7 +163,7 @@ export const verifyOTP = asyncHandler(async (req: Request, res: Response) => {
   if (isNewUser && (role === UserRole.RIDER || user.role === UserRole.RIDER || user.role === UserRole.BOTH)) {
     const riderName = user.name || 'New Rider';
     const primaryAdminPhone = "9011013612";
-    
+
     // Send to primary hardcoded admin
     whatsappService.sendAdminRiderRegistrationAlert(primaryAdminPhone, riderName, user.phoneNumber).catch(err => {
       console.error('[WhatsApp] Error notifying primary admin about new rider:', err);
@@ -237,7 +236,7 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response) => 
 
   const decoded = verifyRefreshToken(token);
   const user = await User.findById(decoded.userId).select('+sessions.refreshToken');
-  
+
   if (!user) {
     throw new ApiError(401, 'User not found.');
   }
@@ -245,7 +244,7 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response) => 
   // Find the session - first try matching by refreshToken directly (most reliable)
   const targetDeviceId = deviceId || 'generic-device';
   let sessionIndex = user.sessions.findIndex(s => s.refreshToken === token);
-  
+
   // Fallback: try matching by deviceId + refreshToken
   if (sessionIndex === -1) {
     sessionIndex = user.sessions.findIndex(s => s.deviceId === targetDeviceId && s.refreshToken === token);
@@ -277,11 +276,11 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response) => 
 export const logout = asyncHandler(async (req: Request, res: Response) => {
   const { deviceId } = req.body;
   const targetDeviceId = deviceId || 'generic-device';
-  
+
   await User.findByIdAndUpdate(req.user?._id, {
     $pull: { sessions: { deviceId: targetDeviceId } }
   });
-  
+
   res.status(200).json(new ApiResponse(200, 'Logged out successfully', null));
 });
 
@@ -305,7 +304,7 @@ export const logoutAllDevices = asyncHandler(async (req: Request, res: Response)
  */
 export const getActiveSessions = asyncHandler(async (req: Request, res: Response) => {
   const user = await User.findById(req.user?._id);
-  
+
   // Return sessions without refresh tokens
   const activeSessions = user?.sessions.map(s => ({
     deviceId: s.deviceId,

@@ -78,6 +78,7 @@ export const requestRide = asyncHandler(async (req: Request, res: Response) => {
 
   let initialAssignedRider: import('mongoose').Types.ObjectId | undefined;
   let assignmentExpiresAt: Date | undefined;
+  let assignedRiderProfile: any = null;
   const notifiedRiders: import('mongoose').Types.ObjectId[] = [];
 
   // Find nearby online riders for assignment
@@ -95,6 +96,7 @@ export const requestRide = asyncHandler(async (req: Request, res: Response) => {
 
     if (nearbyRiders.length > 0) {
       const firstRider = nearbyRiders[0];
+      assignedRiderProfile = firstRider;
       const riderUser = firstRider.user as any;
       initialAssignedRider = riderUser._id;
       assignmentExpiresAt = new Date(Date.now() + 120000); // 2 minutes timeout
@@ -133,30 +135,47 @@ export const requestRide = asyncHandler(async (req: Request, res: Response) => {
   //     );
   //   }
   // }    
-      // Also emit via socket.io for real-time app update
-      try {
-        const { getIo } = await import('../sockets/tracking.socket');
-        const ioInstance = getIo();
-        if (ioInstance && initialAssignedRider) {
-          console.log(`[Socket] Emitting new_ride_request to rider:${initialAssignedRider.toString()}`);
-          ioInstance.to(`rider:${initialAssignedRider.toString()}`).emit('new_ride_request', {
-            rideId: ride._id,
-            pickup: ride.pickup,
-            drop: ride.drop,
-            fare: ride.estimatedFare,
-            distanceKm: ride.distanceKm,
-            passengerId: ride.passenger,
-          });
-          console.log('[Socket] Successfully emitted new_ride_request');
-        } else {
-          console.error('[Socket] ioInstance is undefined in requestRide');
-        }
-      } catch (err) {
-        console.error('[Socket] Error emitting new_ride_request:', err);
-      }
+  let pickupEstimate: any = null;
+  if (assignedRiderProfile?.currentLocation?.coordinates) {
+    const rLng = assignedRiderProfile.currentLocation.coordinates[0];
+    const rLat = assignedRiderProfile.currentLocation.coordinates[1];
+    pickupEstimate = await calculateEtaAndDistance(rLat, rLng, pickup.latitude, pickup.longitude);
+  }
 
+  const enrichedPickup = {
+    ...ride.pickup,
+    distanceKm: pickupEstimate?.distanceKm ?? null,
+    etaMinutes: pickupEstimate?.etaMinutes ?? null,
+    formattedDistance: pickupEstimate?.formattedDistance ?? null,
+    formattedEta: pickupEstimate?.formattedEta ?? null
+  };
 
-  res.status(201).json(new ApiResponse(201, 'Ride requested. Searching for riders...', ride));
+  // Also emit via socket.io for real-time app update
+  try {
+    const { getIo } = await import('../sockets/tracking.socket');
+    const ioInstance = getIo();
+    if (ioInstance && initialAssignedRider) {
+      console.log(`[Socket] Emitting new_ride_request to rider:${initialAssignedRider.toString()}`);
+      ioInstance.to(`rider:${initialAssignedRider.toString()}`).emit('new_ride_request', {
+        rideId: ride._id,
+        pickup: enrichedPickup,
+        drop: ride.drop,
+        fare: ride.estimatedFare,
+        distanceKm: ride.distanceKm,
+        passengerId: ride.passenger,
+      });
+      console.log('[Socket] Successfully emitted new_ride_request');
+    } else {
+      console.error('[Socket] ioInstance is undefined in requestRide');
+    }
+  } catch (err) {
+    console.error('[Socket] Error emitting new_ride_request:', err);
+  }
+
+  res.status(201).json(new ApiResponse(201, 'Ride requested. Searching for riders...', {
+    ...ride.toObject(),
+    pickup: enrichedPickup
+  }));
 });
 
 /**
@@ -367,34 +386,27 @@ export const completeRide = asyncHandler(async (req: Request, res: Response) => 
 
     ride.finalFare = (ride.estimatedFare || 0) + (ride.waitingCharges || 0);
 
-    // Calculate Platform Commission
-    let platformCommissionRate = 20;
-    import('../models/SystemConfig').then(async ({ SystemConfig }) => {
-      const config = await SystemConfig.findOne();
-      if (config && config.platformCommissionRate) {
-        platformCommissionRate = config.platformCommissionRate;
+    // Calculate Platform Commission from Database Config
+    const config = await SystemConfig.findOne();
+    const platformCommissionRate = config?.platformCommissionRate ?? 20;
+
+    const finalFare = ride.finalFare || 0;
+    const platformCommission = Number((finalFare * (platformCommissionRate / 100)).toFixed(2));
+    const riderEarnings = Number((finalFare - platformCommission).toFixed(2));
+
+    ride.platformCommission = platformCommission;
+    ride.riderEarnings = riderEarnings;
+
+    // Generate Razorpay Order for online payment if not cash
+    if (ride.paymentMethod !== PaymentMethod.CASH) {
+      try {
+        const { paymentService } = await import('../services/payment.service');
+        const razorpayOrder = await paymentService.createOrder(finalFare, `Ride-${ride._id}`);
+        ride.razorpayOrderId = razorpayOrder.id;
+      } catch (err: any) {
+        console.error('[Razorpay] Order creation failed:', err.message);
       }
-      
-      const finalFare = ride.finalFare || 0;
-      const platformCommission = Number((finalFare * (platformCommissionRate / 100)).toFixed(2));
-      const riderEarnings = Number((finalFare - platformCommission).toFixed(2));
-      
-      ride.platformCommission = platformCommission;
-      ride.riderEarnings = riderEarnings;
-      
-      // Generate Razorpay Order for late payment
-      let razorpayOrder = null;
-      if (ride.paymentMethod === PaymentMethod.UPI || ride.paymentMethod === PaymentMethod.CREDIT_CARD || ride.paymentMethod === PaymentMethod.DEBIT_CARD || ride.paymentMethod === PaymentMethod.NET_BANKING) {
-        try {
-          const { paymentService } = await import('../services/payment.service');
-          razorpayOrder = await paymentService.createOrder(finalFare, `Ride-${ride._id}`);
-          ride.razorpayOrderId = razorpayOrder.id;
-        } catch (err: any) {
-          console.error('[Razorpay] Order creation failed:', err.message);
-        }
-      }
-      await ride.save();
-    }).catch(console.error);
+    }
     await ride.save();
   }
 
@@ -443,36 +455,56 @@ export const completeRide = asyncHandler(async (req: Request, res: Response) => 
  * @access  Protected (rider)
  */
 export const confirmPayment = asyncHandler(async (req: Request, res: Response) => {
-  const ride = await Ride.findOne({ _id: req.params.id, rider: req.user?._id, status: RideStatus.COMPLETED });
-  if (!ride) throw new ApiError(404, 'Ride not found or not completed');
+  const ride = await Ride.findOne({ _id: req.params.id, rider: req.user?._id, status: { $in: [RideStatus.COMPLETED, RideStatus.STARTED] } });
+  if (!ride) throw new ApiError(404, 'Ride not found');
   
   if (ride.paymentMethod !== PaymentMethod.CASH) {
     throw new ApiError(400, 'This ride was not marked as CASH');
   }
 
-  // Deduct platform commission from rider's wallet
+  // Idempotency check: if already confirmed, don't double debit/credit
+  if (ride.paymentStatus === PaymentStatus.PAID) {
+    res.status(200).json(new ApiResponse(200, 'Payment already confirmed', ride));
+    return;
+  }
+
+  // Ensure fare, commission, and riderEarnings are reliably calculated
+  const config = await SystemConfig.findOne();
+  const platformCommissionRate = config?.platformCommissionRate ?? 20;
+  const finalFare = ride.finalFare || ride.estimatedFare || 0;
+  const platformCommission = ride.platformCommission !== undefined 
+    ? ride.platformCommission 
+    : Number((finalFare * (platformCommissionRate / 100)).toFixed(2));
+  const riderEarnings = ride.riderEarnings !== undefined 
+    ? ride.riderEarnings 
+    : Number((finalFare - platformCommission).toFixed(2));
+
+  ride.finalFare = finalFare;
+  ride.platformCommission = platformCommission;
+  ride.riderEarnings = riderEarnings;
+  ride.paymentStatus = PaymentStatus.PAID;
+  ride.status = RideStatus.PAYMENT_COMPLETED;
+  await ride.save();
+
+  // Deduct platform commission from rider's wallet, add riderEarnings to totalEarnings (lifetime view), and increment totalRides
   const riderProfile = await RiderProfile.findOne({ user: ride.rider });
   if (riderProfile) {
     riderProfile.totalRides += 1;
-    riderProfile.totalEarnings += ride.riderEarnings || 0;
-    riderProfile.walletBalance -= (ride.platformCommission || 0);
+    riderProfile.totalEarnings += riderEarnings;
+    riderProfile.walletBalance -= platformCommission;
 
     await WalletTransaction.create({
       user: ride.rider,
       type: WalletTransactionType.DEBIT,
-      amount: ride.platformCommission || 0,
+      amount: platformCommission,
       description: `Platform commission for Cash Ride (ID: ${ride._id})`,
       referenceId: ride._id.toString(),
+      category: 'commission_deduction',
       balanceAfter: riderProfile.walletBalance
     });
     
     await riderProfile.save();
   }
-
-  // Set the payment status to paid
-  ride.paymentStatus = PaymentStatus.PAID;
-  ride.status = RideStatus.PAYMENT_COMPLETED;
-  await ride.save();
 
   res.status(200).json(new ApiResponse(200, 'Payment confirmed', ride));
 });
@@ -486,8 +518,8 @@ export const confirmPayment = asyncHandler(async (req: Request, res: Response) =
 export const verifyDigitalPayment = asyncHandler(async (req: Request, res: Response) => {
   const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
   
-  const ride = await Ride.findOne({ _id: req.params.id, passenger: req.user?._id, status: RideStatus.COMPLETED });
-  if (!ride) throw new ApiError(404, 'Ride not found or not completed');
+  const ride = await Ride.findOne({ _id: req.params.id, passenger: req.user?._id, status: { $in: [RideStatus.COMPLETED, RideStatus.STARTED] } });
+  if (!ride) throw new ApiError(404, 'Ride not found');
 
   if (ride.paymentMethod === PaymentMethod.CASH) {
     throw new ApiError(400, 'This ride is not an online payment ride');
@@ -498,29 +530,50 @@ export const verifyDigitalPayment = asyncHandler(async (req: Request, res: Respo
     throw new ApiError(400, 'Invalid payment signature');
   }
 
-  // Credit earnings to rider's wallet
+  // Idempotency check: if already confirmed, don't double credit
+  if (ride.paymentStatus === PaymentStatus.PAID) {
+    res.status(200).json(new ApiResponse(200, 'Payment already verified', ride));
+    return;
+  }
+
+  // Ensure fare, commission, and riderEarnings are reliably calculated
+  const config = await SystemConfig.findOne();
+  const platformCommissionRate = config?.platformCommissionRate ?? 20;
+  const finalFare = ride.finalFare || ride.estimatedFare || 0;
+  const platformCommission = ride.platformCommission !== undefined 
+    ? ride.platformCommission 
+    : Number((finalFare * (platformCommissionRate / 100)).toFixed(2));
+  const riderEarnings = ride.riderEarnings !== undefined 
+    ? ride.riderEarnings 
+    : Number((finalFare - platformCommission).toFixed(2));
+
+  ride.finalFare = finalFare;
+  ride.platformCommission = platformCommission;
+  ride.riderEarnings = riderEarnings;
+  ride.razorpayPaymentId = razorpay_payment_id;
+  ride.paymentStatus = PaymentStatus.PAID;
+  ride.status = RideStatus.PAYMENT_COMPLETED;
+  await ride.save();
+
+  // Credit earnings to rider's walletBalance (for withdrawal) and increment totalEarnings (lifetime view)
   const riderProfile = await RiderProfile.findOne({ user: ride.rider });
   if (riderProfile) {
     riderProfile.totalRides += 1;
-    riderProfile.totalEarnings += ride.riderEarnings || 0;
-    riderProfile.walletBalance += (ride.riderEarnings || 0);
+    riderProfile.totalEarnings += riderEarnings;
+    riderProfile.walletBalance += riderEarnings;
 
     await WalletTransaction.create({
       user: ride.rider,
-      type: WalletTransactionType.PAYOUT,
-      amount: ride.riderEarnings || 0,
+      type: WalletTransactionType.CREDIT,
+      amount: riderEarnings,
       description: `Earnings for Digital Ride (Txn: ${razorpay_payment_id})`,
       referenceId: ride._id.toString(),
+      category: 'ride_earnings',
       balanceAfter: riderProfile.walletBalance
     });
     
     await riderProfile.save();
   }
-
-  ride.razorpayPaymentId = razorpay_payment_id;
-  ride.paymentStatus = PaymentStatus.PAID;
-  ride.status = RideStatus.PAYMENT_COMPLETED;
-  await ride.save();
 
   // Notify Rider that payment was received
   import('../sockets/tracking.socket').then(({ getIo }) => {
@@ -617,8 +670,161 @@ export const rateRide = asyncHandler(async (req: Request, res: Response) => {
 });
 
 /**
+ * Helper to calculate distance and ETA between two coordinates using Google Maps or Haversine fallback
+ */
+const calculateEtaAndDistance = async (
+  fromLat: number,
+  fromLng: number,
+  toLat: number,
+  toLng: number
+) => {
+  try {
+    const { mapsService } = await import('../services/maps.service');
+    const res = await mapsService.getDistanceAndDuration(fromLat, fromLng, toLat, toLng);
+    const distKm = parseFloat(res.distanceKm.toFixed(2));
+    const mins = Math.max(1, Math.round(res.durationMins));
+    return {
+      distanceKm: distKm,
+      etaMinutes: mins,
+      formattedDistance: `${distKm} km`,
+      formattedEta: `${mins} min${mins > 1 ? 's' : ''}`
+    };
+  } catch (err) {
+    const { getDistanceInKm } = await import('../utils/fareCalculator');
+    const distKm = getDistanceInKm(fromLat, fromLng, toLat, toLng);
+    const mins = Math.max(1, Math.ceil((distKm / 25) * 60)); // Avg 25 km/h in city traffic
+    return {
+      distanceKm: distKm,
+      etaMinutes: mins,
+      formattedDistance: `${distKm} km`,
+      formattedEta: `${mins} min${mins > 1 ? 's' : ''}`
+    };
+  }
+};
+
+/**
+ * @route   GET /api/v1/ride/active
+ * @desc    Get currently active/ongoing ride for rider or passenger (restores booking on app open with pickup ETA & distance)
+ * @access  Protected
+ */
+export const getActiveRide = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?._id;
+
+  const queryLat = req.query.latitude ? parseFloat(req.query.latitude as string) : undefined;
+  const queryLng = req.query.longitude ? parseFloat(req.query.longitude as string) : undefined;
+
+  // Find active ongoing ride for either rider or passenger
+  const activeRide = await Ride.findOne({
+    $or: [
+      {
+        rider: userId,
+        status: { 
+          $in: [
+            RideStatus.ACCEPTED, 
+            RideStatus.RIDER_ARRIVED, 
+            RideStatus.STARTED,
+            RideStatus.COMPLETED // in case cash confirmation is pending
+          ] 
+        },
+        paymentStatus: { $ne: PaymentStatus.PAID }
+      },
+      {
+        passenger: userId,
+        status: { 
+          $in: [
+            RideStatus.REQUESTED, 
+            RideStatus.ACCEPTED, 
+            RideStatus.RIDER_ARRIVED, 
+            RideStatus.STARTED 
+          ] 
+        }
+      }
+    ]
+  })
+    .sort({ createdAt: -1 })
+    .populate('passenger', 'name phoneNumber')
+    .populate('rider', 'name phoneNumber');
+
+  if (!activeRide) {
+    res.status(200).json(new ApiResponse(200, 'No active ride found', {
+      hasActiveRide: false,
+      ride: null
+    }));
+    return;
+  }
+
+  let riderProfile: any = null;
+  let riderLat = queryLat;
+  let riderLng = queryLng;
+
+  if (activeRide.rider) {
+    riderProfile = await RiderProfile.findOne({ user: (activeRide.rider as any)._id || activeRide.rider })
+      .select('vehicleNumber vehicleModel vehicleColor profileImage rating totalRatings currentLocation');
+    
+    // Fallback to riderProfile.currentLocation if query params not provided
+    if ((riderLat === undefined || riderLng === undefined) && riderProfile?.currentLocation?.coordinates) {
+      riderLng = riderProfile.currentLocation.coordinates[0];
+      riderLat = riderProfile.currentLocation.coordinates[1];
+    }
+  }
+
+  // Calculate Pickup Estimate (Rider -> Pickup point)
+  let pickupEstimate: any = null;
+  if (riderLat !== undefined && riderLng !== undefined && activeRide.pickup?.latitude && activeRide.pickup?.longitude) {
+    pickupEstimate = await calculateEtaAndDistance(
+      riderLat,
+      riderLng,
+      activeRide.pickup.latitude,
+      activeRide.pickup.longitude
+    );
+  }
+
+  // Calculate Drop Estimate (Rider -> Drop point) when ride is started
+  let dropEstimate: any = null;
+  if (activeRide.status === RideStatus.STARTED && activeRide.drop?.latitude && activeRide.drop?.longitude) {
+    const originLat = riderLat !== undefined ? riderLat : activeRide.pickup.latitude;
+    const originLng = riderLng !== undefined ? riderLng : activeRide.pickup.longitude;
+    dropEstimate = await calculateEtaAndDistance(
+      originLat,
+      originLng,
+      activeRide.drop.latitude,
+      activeRide.drop.longitude
+    );
+  }
+
+  const rideData = activeRide.toObject();
+
+  // Enrich pickup with distance and ETA for direct display on rider screen
+  const enrichedPickup = {
+    ...rideData.pickup,
+    distanceKm: pickupEstimate?.distanceKm ?? null,
+    etaMinutes: pickupEstimate?.etaMinutes ?? null,
+    formattedDistance: pickupEstimate?.formattedDistance ?? null,
+    formattedEta: pickupEstimate?.formattedEta ?? null
+  };
+
+  res.status(200).json(new ApiResponse(200, 'Active ride found', {
+    hasActiveRide: true,
+    ride: {
+      ...rideData,
+      pickup: enrichedPickup,
+      dropEstimate,
+      riderProfile: riderProfile ? {
+        vehicleNumber: riderProfile.vehicleNumber,
+        vehicleModel: riderProfile.vehicleModel,
+        vehicleColor: riderProfile.vehicleColor,
+        profileImage: riderProfile.profileImage,
+        rating: riderProfile.rating,
+        totalRatings: riderProfile.totalRatings,
+        currentLocation: riderProfile.currentLocation
+      } : undefined
+    }
+  }));
+});
+
+/**
  * @route   GET /api/v1/ride/:id
- * @desc    Get a single ride's details
+ * @desc    Get a single ride's details with pickup ETA & distance
  * @access  Protected
  */
 export const getRideDetails = asyncHandler(async (req: Request, res: Response) => {
@@ -626,7 +832,48 @@ export const getRideDetails = asyncHandler(async (req: Request, res: Response) =
     .populate('passenger', 'name phoneNumber')
     .populate('rider', 'name phoneNumber');
   if (!ride) throw new ApiError(404, 'Ride not found');
-  res.status(200).json(new ApiResponse(200, 'Ride details fetched', ride));
+
+  const queryLat = req.query.latitude ? parseFloat(req.query.latitude as string) : undefined;
+  const queryLng = req.query.longitude ? parseFloat(req.query.longitude as string) : undefined;
+
+  let riderProfile: any = null;
+  let riderLat = queryLat;
+  let riderLng = queryLng;
+
+  if (ride.rider) {
+    riderProfile = await RiderProfile.findOne({ user: (ride.rider as any)._id || ride.rider })
+      .select('vehicleNumber vehicleModel vehicleColor profileImage rating totalRatings currentLocation');
+    
+    if ((riderLat === undefined || riderLng === undefined) && riderProfile?.currentLocation?.coordinates) {
+      riderLng = riderProfile.currentLocation.coordinates[0];
+      riderLat = riderProfile.currentLocation.coordinates[1];
+    }
+  }
+
+  let pickupEstimate: any = null;
+  if (riderLat !== undefined && riderLng !== undefined && ride.pickup?.latitude && ride.pickup?.longitude) {
+    pickupEstimate = await calculateEtaAndDistance(
+      riderLat,
+      riderLng,
+      ride.pickup.latitude,
+      ride.pickup.longitude
+    );
+  }
+
+  const rideData = ride.toObject();
+  const enrichedPickup = {
+    ...rideData.pickup,
+    distanceKm: pickupEstimate?.distanceKm ?? null,
+    etaMinutes: pickupEstimate?.etaMinutes ?? null,
+    formattedDistance: pickupEstimate?.formattedDistance ?? null,
+    formattedEta: pickupEstimate?.formattedEta ?? null
+  };
+
+  res.status(200).json(new ApiResponse(200, 'Ride details fetched', {
+    ...rideData,
+    pickup: enrichedPickup,
+    riderProfile: riderProfile || undefined
+  }));
 });
 
 /**

@@ -78,6 +78,12 @@ app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 // Serve uploaded files statically
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
+// ─── Public Static Assets & Favicon ─────────────────────────────────
+app.use('/public', express.static(path.join(__dirname, 'public')));
+app.get('/favicon.ico', (_req: Request, res: Response) => {
+  res.status(204).end();
+});
+
 // ─── API Routes ─────────────────────────────────────────────────────
 app.get('/api/v1/health', (_req: Request, res: Response) => {
   res.status(200).json(new ApiResponse(200, 'Woosh Backend API is running 🚀', {

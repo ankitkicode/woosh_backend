@@ -261,29 +261,57 @@ export const getEarnings = asyncHandler(async (req: Request, res: Response) => {
 
   const riderId = new mongoose.Types.ObjectId(req.user?._id as string);
 
-  const [dailyResult, weeklyResult, monthlyResult] = await Promise.all([
+  const [lifetimeResult, dailyResult, weeklyResult, monthlyResult] = await Promise.all([
+    Ride.aggregate([
+      { $match: { rider: riderId, status: { $in: [RideStatus.COMPLETED, RideStatus.PAYMENT_COMPLETED] } } },
+      { $group: { 
+          _id: null, 
+          total: { $sum: { $ifNull: ["$riderEarnings", { $subtract: ["$finalFare", { $ifNull: ["$platformCommission", { $multiply: ["$finalFare", 0.2] }] }] }] } }, 
+          count: { $sum: 1 } 
+        } 
+      }
+    ]),
     Ride.aggregate([
       { $match: { rider: riderId, status: { $in: [RideStatus.COMPLETED, RideStatus.PAYMENT_COMPLETED] }, rideEndedAt: { $gte: startOfDay } } },
-      { $group: { _id: null, total: { $sum: { $ifNull: ["$riderEarnings", "$finalFare"] } }, count: { $sum: 1 } } }
+      { $group: { 
+          _id: null, 
+          total: { $sum: { $ifNull: ["$riderEarnings", { $subtract: ["$finalFare", { $ifNull: ["$platformCommission", { $multiply: ["$finalFare", 0.2] }] }] }] } }, 
+          count: { $sum: 1 } 
+        } 
+      }
     ]),
     Ride.aggregate([
       { $match: { rider: riderId, status: { $in: [RideStatus.COMPLETED, RideStatus.PAYMENT_COMPLETED] }, rideEndedAt: { $gte: startOfWeek } } },
       { $group: { 
           _id: { $dayOfWeek: "$rideEndedAt" }, 
-          total: { $sum: { $ifNull: ["$riderEarnings", "$finalFare"] } },
+          total: { $sum: { $ifNull: ["$riderEarnings", { $subtract: ["$finalFare", { $ifNull: ["$platformCommission", { $multiply: ["$finalFare", 0.2] }] }] }] } },
           count: { $sum: 1 }
         }
       }
     ]),
     Ride.aggregate([
       { $match: { rider: riderId, status: { $in: [RideStatus.COMPLETED, RideStatus.PAYMENT_COMPLETED] }, rideEndedAt: { $gte: startOfMonth } } },
-      { $group: { _id: null, total: { $sum: { $ifNull: ["$riderEarnings", "$finalFare"] } }, count: { $sum: 1 } } }
+      { $group: { 
+          _id: null, 
+          total: { $sum: { $ifNull: ["$riderEarnings", { $subtract: ["$finalFare", { $ifNull: ["$platformCommission", { $multiply: ["$finalFare", 0.2] }] }] }] } }, 
+          count: { $sum: 1 } 
+        } 
+      }
     ])
   ]);
 
-  const todayEarnings = dailyResult[0]?.total || 0;
+  const totalEarnings = Number((lifetimeResult[0]?.total || profile.totalEarnings || 0).toFixed(2));
+  const totalRides = lifetimeResult[0]?.count || profile.totalRides || 0;
+
+  // Persist synced totalEarnings and totalRides to RiderProfile in MongoDB if lagging
+  if (totalEarnings > (profile.totalEarnings || 0) || totalRides > (profile.totalRides || 0)) {
+    profile.totalEarnings = Math.max(profile.totalEarnings || 0, totalEarnings);
+    profile.totalRides = Math.max(profile.totalRides || 0, totalRides);
+    await profile.save();
+  }
+  const todayEarnings = Number((dailyResult[0]?.total || 0).toFixed(2));
   const todayRides = dailyResult[0]?.count || 0;
-  const monthlyEarnings = monthlyResult[0]?.total || 0;
+  const monthlyEarnings = Number((monthlyResult[0]?.total || 0).toFixed(2));
   const monthlyRides = monthlyResult[0]?.count || 0;
 
   let weeklyEarnings = 0;
@@ -303,15 +331,15 @@ export const getEarnings = asyncHandler(async (req: Request, res: Response) => {
 
   res.status(200).json(new ApiResponse(200, 'Earnings fetched', {
     summary: { 
-      totalEarnings: profile.totalEarnings, 
+      totalEarnings, 
       walletBalance: profile.walletBalance, 
       cashDues,
       onlineHours: profile.onlineHours,
-      totalRides: profile.totalRides, 
+      totalRides, 
       rating: profile.rating,
       todayEarnings,
       todayRides,
-      weeklyEarnings,
+      weeklyEarnings: Number(weeklyEarnings.toFixed(2)),
       weeklyRides,
       monthlyEarnings,
       monthlyRides,

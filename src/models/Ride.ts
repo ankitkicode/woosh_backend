@@ -51,6 +51,7 @@ export interface IRide extends Document {
   finalFare?: number;
   platformCommission?: number;
   riderEarnings?: number;
+  tipAmount?: number;
   paymentMethod: PaymentMethod;
   paymentStatus: PaymentStatus;
   razorpayOrderId?: string;
@@ -98,6 +99,7 @@ const rideSchema = new Schema<IRide>(
     finalFare: { type: Number },
     platformCommission: { type: Number },
     riderEarnings: { type: Number },
+    tipAmount: { type: Number, default: 0 },
     paymentMethod: { type: String, enum: Object.values(PaymentMethod), default: PaymentMethod.CASH },
     paymentStatus: { type: String, enum: Object.values(PaymentStatus), default: PaymentStatus.PENDING },
     razorpayOrderId: { type: String },

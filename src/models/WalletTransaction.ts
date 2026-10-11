@@ -8,6 +8,7 @@ export interface IWalletTransaction extends Document {
   description: string;
   referenceId?: string; // ride ID or payment gateway ref
   balanceAfter: number;
+  category?: string; // 'ride_earnings', 'commission_deduction', 'payout', 'cash_dues_repayment', 'topup', 'refund'
   createdAt: Date;
 }
 
@@ -19,6 +20,7 @@ const walletTransactionSchema = new Schema<IWalletTransaction>(
     description: { type: String, required: true, trim: true },
     referenceId: { type: String },
     balanceAfter: { type: Number, required: true },
+    category: { type: String, trim: true, index: true },
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );

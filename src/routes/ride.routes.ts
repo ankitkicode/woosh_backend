@@ -6,7 +6,7 @@ import { validate } from '../middlewares/validate.middleware';
 import {
   estimateFare, requestRide, getNearbyRiders,
   acceptRide, rejectRide, riderArrived, startRide, completeRide, cancelRide, confirmPayment,
-  getRideDetails, getRideHistory, rateRide, verifyDigitalPayment, getHighDemandAreas
+  getRideDetails, getRideHistory, rateRide, verifyDigitalPayment, getHighDemandAreas, getActiveRide
 } from '../controllers/ride.controller';
 import { rideEstimateSchema, requestRideSchema, cancelRideSchema } from '../validations/ride.validation';
 
@@ -40,6 +40,7 @@ requestRide);
 router.get('/nearby-riders', getNearbyRiders);
 router.get('/high-demand', getHighDemandAreas);
 router.get('/history', getRideHistory);
+router.get('/active', getActiveRide);
 router.get('/:id', getRideDetails);
 router.put('/:id/accept', acceptRide);
 router.put('/:id/reject', rejectRide);

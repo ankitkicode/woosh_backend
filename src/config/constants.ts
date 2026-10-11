@@ -68,6 +68,7 @@ export enum PaymentStatus {
 }
 
 export enum WalletTransactionType {
+  CREDIT = 'credit',
   TOPUP = 'topup',
   DEBIT = 'debit',
   REFUND = 'refund',
