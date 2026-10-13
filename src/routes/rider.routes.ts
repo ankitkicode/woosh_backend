@@ -4,7 +4,7 @@ import { kycGate } from '../middlewares/auth.middleware';
 import { upload } from '../middlewares/upload.middleware';
 import { validate } from '../middlewares/validate.middleware';
 import {
-  getRiderProfile, updateRiderProfile, submitKYC,
+  getRiderProfile, updateRiderProfile, submitKYC, resubmitDocument,
   getKYCStatus, toggleOnlineStatus, getEarnings, updateSafetyChecklist, uploadProfileImage, requestPayout,
   addBankAccount, getBankAccounts, setPrimaryBankAccount, updateRiderSettings,
   addEmergencyContact, updateEmergencyContact, deleteEmergencyContact
@@ -30,6 +30,8 @@ router.post('/kyc', upload.fields([
   { name: 'face_verification', maxCount: 1 },
   { name: 'selfie_verification', maxCount: 1 },
 ]), submitKYC);
+router.put('/kyc/documents/:docType', upload.any(), resubmitDocument);
+router.post('/kyc/documents/:docType', upload.any(), resubmitDocument);
 router.get('/kyc/status', getKYCStatus);
 router.put('/safety-checklist', updateSafetyChecklist);
 router.put('/settings', validate(updateSettingsSchema), updateRiderSettings);

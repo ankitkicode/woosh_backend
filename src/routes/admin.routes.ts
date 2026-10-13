@@ -94,5 +94,6 @@ router.put('/settings', superAdminOnly, updateSettings);
 router.get('/payouts', listPayoutRequests);
 router.put('/payouts/:id', updatePayoutRequest);
 router.get('/riders/:id/wallet-history', getRiderWalletHistory);
+router.get('/riders/:id/wallet', getRiderWalletHistory);
 
 export default router;

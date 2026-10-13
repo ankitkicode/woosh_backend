@@ -11,11 +11,12 @@ import { RiderProfile } from '../models/RiderProfile';
 import { WalletTransaction } from '../models/WalletTransaction';
 import { SOSAlert } from '../models/SOSAlert';
 import { InsuranceClaim } from '../models/InsuranceClaim';
-import { KYCStatus, RideStatus, ComplaintStatus, PaymentStatus, WalletTransactionType } from '../config/constants';
+import { KYCStatus, RideStatus, ComplaintStatus, PaymentStatus, WalletTransactionType, UserRole } from '../config/constants';
 import { ChildProfile } from '../models/ChildProfile';
 import { Admin } from '../models/Admin';
 import { generateAccessToken, generateRefreshToken } from '../utils/generateToken';
 import { PayoutRequest } from '../models/PayoutRequest';
+import { fcmService } from '../services/fcm.service';
 
 /**
  * @route   POST /api/v1/admin/login
@@ -167,8 +168,14 @@ export const getAllRiders = asyncHandler(async (req: Request, res: Response) => 
  * @access  Protected (admin)
  */
 export const getRiderById = asyncHandler(async (req: Request, res: Response) => {
-  const profile = await RiderProfile.findById(req.params.id)
+  const riderId = req.params.id as string;
+  let profile = await RiderProfile.findById(riderId)
     .populate('user', '-password -sessions');
+
+  if (!profile && mongoose.Types.ObjectId.isValid(riderId)) {
+    profile = await RiderProfile.findOne({ user: riderId })
+      .populate('user', '-password -sessions');
+  }
 
   if (!profile) {
     throw new ApiError(404, 'Rider profile not found');
@@ -196,17 +203,20 @@ export const getRiderById = asyncHandler(async (req: Request, res: Response) => 
  * @access  Protected (admin)
  */
 export const approveRider = asyncHandler(async (req: Request, res: Response) => {
-  const profile = await RiderProfile.findById(req.params.id);
+  const riderId = req.params.id as string;
+  let profile = await RiderProfile.findById(riderId);
+  if (!profile && mongoose.Types.ObjectId.isValid(riderId)) {
+    profile = await RiderProfile.findOne({ user: riderId });
+  }
   
   if (!profile) throw new ApiError(404, 'Rider profile not found');
 
   // Auto-approve all documents if they are not already approved
   if (profile.documents && profile.documents.length > 0) {
     profile.documents.forEach((doc: any) => {
-      if (doc.status !== 'APPROVED') {
-        doc.status = 'APPROVED';
-        doc.isVerified = true;
-      }
+      doc.status = 'APPROVED';
+      doc.isVerified = true;
+      doc.rejectionReason = undefined;
     });
   }
 
@@ -214,7 +224,29 @@ export const approveRider = asyncHandler(async (req: Request, res: Response) => 
   profile.kycRejectionReason = undefined;
   await profile.save();
 
-  res.status(200).json(new ApiResponse(200, 'Rider KYC approved', profile));
+  // Ensure associated User is active and has rider role
+  const user = await User.findById(profile.user);
+  if (user) {
+    user.isActive = true;
+    if (user.role === UserRole.PASSENGER) {
+      user.role = UserRole.BOTH;
+    }
+    await user.save();
+  }
+
+  // Send push notification to rider
+  try {
+    await fcmService.sendToUser(
+      profile.user.toString(),
+      '🎉 KYC Application Approved!',
+      'Congratulations! Your rider profile has been verified and approved. You can now go online and accept rides.',
+      { type: 'KYC_STATUS', status: KYCStatus.APPROVED }
+    );
+  } catch (notifyErr) {
+    console.error('FCM notify on approve error:', notifyErr);
+  }
+
+  res.status(200).json(new ApiResponse(200, 'Rider KYC approved successfully', profile));
 });
 
 /**
@@ -223,15 +255,50 @@ export const approveRider = asyncHandler(async (req: Request, res: Response) => 
  * @access  Protected (admin)
  */
 export const rejectRider = asyncHandler(async (req: Request, res: Response) => {
-  const { reason } = req.body;
-  if (!reason) throw new ApiError(400, 'Rejection reason is required');
-  const profile = await RiderProfile.findByIdAndUpdate(
-    req.params.id,
-    { kycStatus: KYCStatus.REJECTED, kycRejectionReason: reason },
-    { new: true }
-  );
+  const reason = req.body.reason || req.body.rejectionReason;
+  if (!reason || !reason.trim()) {
+    throw new ApiError(400, 'Rejection reason is required');
+  }
+
+  const riderId = req.params.id as string;
+  let profile = await RiderProfile.findById(riderId);
+  if (!profile && mongoose.Types.ObjectId.isValid(riderId)) {
+    profile = await RiderProfile.findOne({ user: riderId });
+  }
+
   if (!profile) throw new ApiError(404, 'Rider profile not found');
-  res.status(200).json(new ApiResponse(200, 'Rider KYC rejected', profile));
+
+  profile.kycStatus = KYCStatus.REJECTED;
+  profile.kycRejectionReason = reason.trim();
+  profile.isOnline = false; // Disallow online status immediately
+
+  // If rider has documents, mark non-approved documents as rejected with reason so rider app knows which docs need resubmission
+  if (profile.documents && profile.documents.length > 0) {
+    profile.documents.forEach((doc: any) => {
+      if (doc.status !== 'APPROVED') {
+        doc.status = 'REJECTED';
+        if (!doc.rejectionReason) {
+          doc.rejectionReason = reason.trim();
+        }
+      }
+    });
+  }
+
+  await profile.save();
+
+  // Send push notification to rider
+  try {
+    await fcmService.sendToUser(
+      profile.user.toString(),
+      '⚠️ KYC Application Rejected',
+      `Your rider KYC application was rejected. Reason: ${reason.trim()}. Please review and update your documents.`,
+      { type: 'KYC_STATUS', status: KYCStatus.REJECTED, reason: reason.trim() }
+    );
+  } catch (notifyErr) {
+    console.error('FCM notify on reject error:', notifyErr);
+  }
+
+  res.status(200).json(new ApiResponse(200, 'Rider KYC rejected successfully', profile));
 });
 
 /**
@@ -240,14 +307,18 @@ export const rejectRider = asyncHandler(async (req: Request, res: Response) => {
  * @access  Protected (admin)
  */
 export const deleteRider = asyncHandler(async (req: Request, res: Response) => {
-  const profile = await RiderProfile.findById(req.params.id);
+  const riderId = req.params.id as string;
+  let profile = await RiderProfile.findById(riderId);
+  if (!profile && mongoose.Types.ObjectId.isValid(riderId)) {
+    profile = await RiderProfile.findOne({ user: riderId });
+  }
   if (!profile) throw new ApiError(404, 'Rider profile not found');
 
   // Delete the associated user
   await User.findByIdAndDelete(profile.user);
   
   // Delete the rider profile
-  await RiderProfile.findByIdAndDelete(req.params.id);
+  await RiderProfile.findByIdAndDelete(profile._id);
 
   res.status(200).json(new ApiResponse(200, 'Rider deleted successfully', null));
 });
@@ -338,19 +409,24 @@ export const bulkUpdatePayouts = asyncHandler(async (req: Request, res: Response
  * @access  Protected (admin)
  */
 export const updateDocumentStatus = asyncHandler(async (req: Request, res: Response) => {
-  const { id, docType } = req.params;
-  const { status, reason } = req.body;
+  const id = req.params.id as string;
+  const docType = req.params.docType as string;
+  const status = (req.body.status || '') as string;
+  const reason = ((req.body.reason || req.body.rejectionReason || '') as string).trim();
 
-  const upperStatus = status?.toUpperCase();
+  const upperStatus = status.toUpperCase();
 
   if (!['APPROVED', 'REJECTED'].includes(upperStatus)) {
-    throw new ApiError(400, 'Invalid status');
+    throw new ApiError(400, 'Invalid status. Must be APPROVED or REJECTED');
   }
   if (upperStatus === 'REJECTED' && !reason) {
     throw new ApiError(400, 'Rejection reason is required');
   }
 
-  const profile = await RiderProfile.findById(id);
+  let profile = await RiderProfile.findById(id);
+  if (!profile && mongoose.Types.ObjectId.isValid(id)) {
+    profile = await RiderProfile.findOne({ user: id });
+  }
   if (!profile) throw new ApiError(404, 'Rider profile not found');
 
   const docIndex = profile.documents.findIndex(d => d.type === docType);
@@ -358,8 +434,9 @@ export const updateDocumentStatus = asyncHandler(async (req: Request, res: Respo
     throw new ApiError(404, 'Document not found');
   }
 
-  profile.documents[docIndex].status = upperStatus;
+  profile.documents[docIndex].status = upperStatus as 'APPROVED' | 'REJECTED';
   profile.documents[docIndex].rejectionReason = upperStatus === 'REJECTED' ? reason : undefined;
+  (profile.documents[docIndex] as any).isVerified = upperStatus === 'APPROVED';
 
   // Check overall KYC status based on documents
   const allApproved = profile.documents.length > 0 && profile.documents.every(d => d.status === 'APPROVED');
@@ -368,15 +445,49 @@ export const updateDocumentStatus = asyncHandler(async (req: Request, res: Respo
   if (allApproved) {
     profile.kycStatus = KYCStatus.APPROVED;
     profile.kycRejectionReason = undefined;
+
+    // Ensure associated user is active and has rider role
+    const user = await User.findById(profile.user);
+    if (user) {
+      user.isActive = true;
+      if (user.role === UserRole.PASSENGER) {
+        user.role = UserRole.BOTH;
+      }
+      await user.save();
+    }
   } else if (anyRejected) {
     profile.kycStatus = KYCStatus.REJECTED;
-    profile.kycRejectionReason = 'Some documents were rejected. Please review and re-upload.';
+    profile.kycRejectionReason = reason || 'Some documents were rejected. Please review and re-upload.';
+    profile.isOnline = false;
   } else {
     profile.kycStatus = KYCStatus.UNDER_REVIEW;
     profile.kycRejectionReason = undefined;
   }
 
   await profile.save();
+
+  // Send push notification for document status update
+  try {
+    const formattedDocName = docType.replace(/_/g, ' ').toUpperCase();
+    if (upperStatus === 'APPROVED') {
+      await fcmService.sendToUser(
+        profile.user.toString(),
+        '📄 Document Approved',
+        `Your document (${formattedDocName}) has been verified and approved.`,
+        { type: 'DOC_STATUS', docType, status: 'APPROVED' }
+      );
+    } else {
+      await fcmService.sendToUser(
+        profile.user.toString(),
+        '⚠️ Document Rejected',
+        `Your document (${formattedDocName}) was rejected. Reason: ${reason}`,
+        { type: 'DOC_STATUS', docType, status: 'REJECTED', reason }
+      );
+    }
+  } catch (notifyErr) {
+    console.error('FCM notify on doc status update error:', notifyErr);
+  }
+
   res.status(200).json(new ApiResponse(200, `Document ${status.toLowerCase()} successfully`, profile));
 });
 

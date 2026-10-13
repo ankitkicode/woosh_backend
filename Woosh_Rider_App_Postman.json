@@ -214,6 +214,34 @@
           }
         },
         {
+          "name": "Resubmit Specific KYC Document",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rider/kyc/documents/driving_license",
+              "host": ["{{baseUrl}}"],
+              "path": ["rider", "kyc", "documents", "driving_license"]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "document",
+                  "type": "file",
+                  "description": "Select the new document image/PDF. You can also name the key 'file' or the document type like 'driving_license'.",
+                  "src": []
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "Update Rider Preferences & Settings",
           "request": {
             "method": "PUT",

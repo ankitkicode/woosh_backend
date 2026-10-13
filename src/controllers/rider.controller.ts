@@ -142,6 +142,7 @@ export const submitKYC = asyncHandler(async (req: Request, res: Response) => {
     const hasRejected = profile.documents.some(d => d.status === 'REJECTED');
     if (!hasRejected) {
       profile.kycStatus = KYCStatus.UNDER_REVIEW;
+      profile.kycRejectionReason = undefined;
     }
     
     await profile.save();
@@ -172,14 +173,116 @@ export const submitKYC = asyncHandler(async (req: Request, res: Response) => {
 });
 
 /**
+ * @route   PUT /api/v1/rider/kyc/documents/:docType
+ * @desc    Resubmit a specific KYC document (e.g. after admin rejection)
+ * @access  Protected (rider)
+ */
+export const resubmitDocument = asyncHandler(async (req: Request, res: Response) => {
+  const { docType } = req.params;
+
+  // Extract file from flexible field names ('document', 'file', or docType itself)
+  const anyFiles = req.files as Express.Multer.File[] | { [key: string]: Express.Multer.File[] } | undefined;
+  let file: Express.Multer.File | undefined = req.file;
+
+  if (!file && anyFiles) {
+    if (Array.isArray(anyFiles) && anyFiles.length > 0) {
+      file = anyFiles[0];
+    } else if (typeof anyFiles === 'object') {
+      const matchKey = Object.keys(anyFiles).find(k => k === docType || k === 'document' || k === 'file');
+      if (matchKey && (anyFiles as any)[matchKey]?.[0]) {
+        file = (anyFiles as any)[matchKey][0];
+      } else {
+        const firstKey = Object.keys(anyFiles)[0];
+        if (firstKey && (anyFiles as any)[firstKey]?.[0]) {
+          file = (anyFiles as any)[firstKey][0];
+        }
+      }
+    }
+  }
+
+  if (!file) {
+    throw new ApiError(400, 'Document file is required');
+  }
+
+  const validDocTypes = Object.values(DocumentType);
+  if (!validDocTypes.includes(docType as DocumentType)) {
+    throw new ApiError(400, `Invalid document type '${docType}'. Allowed types: ${validDocTypes.join(', ')}`);
+  }
+
+  const profile = await RiderProfile.findOne({ user: req.user?._id });
+  if (!profile) {
+    throw new ApiError(404, 'Rider profile not found. Please submit initial KYC first.');
+  }
+
+  const docIndex = profile.documents.findIndex(d => d.type === docType);
+  const updatedDoc = {
+    type: docType as DocumentType,
+    url: `/uploads/${file.filename}`,
+    status: 'PENDING' as const,
+    rejectionReason: undefined
+  };
+
+  if (docIndex >= 0) {
+    profile.documents[docIndex] = updatedDoc;
+  } else {
+    profile.documents.push(updatedDoc);
+  }
+
+  // If no remaining documents are REJECTED, move overall status to UNDER_REVIEW
+  const hasRejected = profile.documents.some(d => d.status === 'REJECTED');
+  if (!hasRejected) {
+    profile.kycStatus = KYCStatus.UNDER_REVIEW;
+    profile.kycRejectionReason = undefined;
+  }
+
+  await profile.save();
+
+  res.status(200).json(new ApiResponse(200, `Document '${docType}' submitted successfully. Now under review.`, {
+    kycStatus: profile.kycStatus,
+    document: updatedDoc,
+    documents: profile.documents
+  }));
+});
+
+/**
  * @route   GET /api/v1/rider/kyc/status
- * @desc    Get KYC approval status
+ * @desc    Get KYC approval status along with document details and rejection reasons
  * @access  Protected (rider)
  */
 export const getKYCStatus = asyncHandler(async (req: Request, res: Response) => {
-  const profile = await RiderProfile.findOne({ user: req.user?._id }).select('kycStatus kycRejectionReason safetyChecklist');
+  const profile = await RiderProfile.findOne({ user: req.user?._id });
   if (!profile) throw new ApiError(404, 'Rider profile not found. Please submit KYC first.');
-  res.status(200).json(new ApiResponse(200, 'KYC status fetched', profile));
+
+  const documents = profile.documents || [];
+  const rejectedDocs = documents.filter((d: any) => (d.status || '').toUpperCase() === 'REJECTED');
+  const approvedDocs = documents.filter((d: any) => (d.status || '').toUpperCase() === 'APPROVED');
+  const pendingDocs = documents.filter((d: any) => (d.status || '').toUpperCase() === 'PENDING');
+
+  res.status(200).json(new ApiResponse(200, 'KYC status fetched', {
+    _id: profile._id,
+    kycStatus: profile.kycStatus,
+    kycRejectionReason: profile.kycRejectionReason || (rejectedDocs.length > 0 ? rejectedDocs[0].rejectionReason : undefined),
+    isOnline: profile.isOnline,
+    canGoOnline: profile.kycStatus === KYCStatus.APPROVED,
+    safetyChecklist: profile.safetyChecklist,
+    documents: documents,
+    rejectedDocuments: rejectedDocs.map((d: any) => ({
+      type: d.type,
+      url: d.url,
+      status: d.status,
+      rejectionReason: d.rejectionReason || profile.kycRejectionReason
+    })),
+    approvedDocuments: approvedDocs.map((d: any) => ({
+      type: d.type,
+      url: d.url,
+      status: d.status
+    })),
+    pendingDocuments: pendingDocs.map((d: any) => ({
+      type: d.type,
+      url: d.url,
+      status: d.status
+    }))
+  }));
 });
 
 /**
