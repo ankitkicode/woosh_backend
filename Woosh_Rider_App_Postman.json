@@ -90,6 +90,120 @@
               "raw": "{\n  \"phoneNumber\": \"9876543210\",\n  \"otp\": \"1234\",\n  \"role\": \"rider\",\n  \"deviceId\": \"device_android_99\",\n  \"fcmToken\": \"fcm_token_example_rider\"\n}"
             }
           }
+        },
+        {
+          "name": "Set MPIN (First Time Setup)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/set-mpin",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "set-mpin"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mpin\": \"1234\",\n  \"confirmMpin\": \"1234\"\n}"
+            },
+            "description": "Logged-in rider sets a 4-6 digit MPIN for quick app lock/unlock."
+          }
+        },
+        {
+          "name": "Verify MPIN (Quick App Unlock)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if(jsonData.data && jsonData.data.accessToken) {",
+                  "    pm.collectionVariables.set('token', jsonData.data.accessToken);",
+                  "    console.log('Rider token refreshed via MPIN unlock!');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/verify-mpin",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "verify-mpin"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mpin\": \"1234\",\n  \"phoneNumber\": \"9876543210\"\n}"
+            },
+            "description": "When rider re-opens app, enters MPIN to instantly unlock app and receive refreshed token without entering OTP."
+          }
+        },
+        {
+          "name": "Change MPIN",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/change-mpin",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "change-mpin"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"oldMpin\": \"1234\",\n  \"newMpin\": \"5678\",\n  \"confirmNewMpin\": \"5678\"\n}"
+            },
+            "description": "Rider changes their MPIN by providing their old MPIN."
+          }
+        },
+        {
+          "name": "Forgot / Reset MPIN (with OTP)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/forgot-mpin",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "forgot-mpin"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phoneNumber\": \"9876543210\",\n  \"otp\": \"1234\",\n  \"newMpin\": \"9999\",\n  \"confirmNewMpin\": \"9999\"\n}"
+            },
+            "description": "Resets forgotten MPIN using mobile OTP verification."
+          }
         }
       ]
     },

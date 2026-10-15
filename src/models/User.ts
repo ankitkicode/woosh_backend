@@ -33,6 +33,10 @@ export interface IUser extends Document {
   role: UserRole;
   isActive: boolean;
   sessions: ISession[];
+  mpin?: string;
+  isMpinSet: boolean;
+  mpinAttempts: number;
+  mpinLockedUntil?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -70,6 +74,10 @@ const userSchema = new Schema<IUser>(
         lastActive: { type: Date, default: Date.now },
       },
     ],
+    mpin: { type: String, select: false },
+    isMpinSet: { type: Boolean, default: false },
+    mpinAttempts: { type: Number, default: 0 },
+    mpinLockedUntil: { type: Date },
   },
   { timestamps: true }
 );

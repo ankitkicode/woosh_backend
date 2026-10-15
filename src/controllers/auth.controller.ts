@@ -17,6 +17,7 @@ import { smsService } from '../services/sms.service';
 import { whatsappService } from '../services/whatsapp.service';
 import { FaceService } from '../services/face.service';
 import fs from 'fs';
+import bcrypt from 'bcryptjs';
 
 /**
  * @route   POST /api/v1/auth/verify-gender
@@ -245,7 +246,13 @@ export const verifyOTP = asyncHandler(async (req: Request, res: Response) => {
 
   res.status(200).json(
     new ApiResponse(200, isNewUser ? 'Account created successfully' : 'Logged in successfully', {
-      user: { _id: user._id, phoneNumber: user.phoneNumber, role: user.role, name: user.name },
+      user: { 
+        _id: user._id, 
+        phoneNumber: user.phoneNumber, 
+        role: user.role, 
+        name: user.name,
+        isMpinSet: Boolean(user.isMpinSet)
+      },
       accessToken,
       refreshToken,
       isNewUser,
@@ -340,3 +347,208 @@ export const getActiveSessions = asyncHandler(async (req: Request, res: Response
 
   res.status(200).json(new ApiResponse(200, 'Active sessions retrieved', activeSessions));
 });
+
+/**
+ * @route   POST /api/v1/auth/set-mpin
+ * @desc    Set 4-6 digit MPIN for app lock/unlock
+ * @access  Protected
+ */
+export const setMpin = asyncHandler(async (req: Request, res: Response) => {
+  const { mpin } = req.body;
+  const userId = req.user?._id;
+
+  const user = await User.findById(userId);
+  if (!user) {
+    throw new ApiError(404, 'User not found');
+  }
+
+  // Hash MPIN
+  const hashedMpin = await bcrypt.hash(mpin, 10);
+
+  user.mpin = hashedMpin;
+  user.isMpinSet = true;
+  user.mpinAttempts = 0;
+  user.mpinLockedUntil = undefined;
+  await user.save();
+
+  res.status(200).json(new ApiResponse(200, 'MPIN set successfully', {
+    isMpinSet: true,
+  }));
+});
+
+/**
+ * @route   POST /api/v1/auth/verify-mpin
+ * @desc    Verify MPIN to quick-unlock the app
+ * @access  Public (with phoneNumber/token) or Protected
+ */
+export const verifyMpin = asyncHandler(async (req: Request, res: Response) => {
+  const { mpin, phoneNumber, deviceId } = req.body;
+
+  // Identify user: either from authenticated token OR from phoneNumber
+  let user: any = null;
+  if (req.user?._id) {
+    user = await User.findById(req.user._id).select('+mpin');
+  } else if (phoneNumber) {
+    user = await User.findOne({ phoneNumber }).select('+mpin');
+  }
+
+  if (!user) {
+    throw new ApiError(404, 'User not found');
+  }
+
+  if (!user.isMpinSet || !user.mpin) {
+    throw new ApiError(400, 'MPIN is not set for this account. Please set an MPIN first.');
+  }
+
+  // Check brute force lockout
+  if (user.mpinLockedUntil && user.mpinLockedUntil > new Date()) {
+    const remainingSeconds = Math.ceil((user.mpinLockedUntil.getTime() - Date.now()) / 1000);
+    const remainingMinutes = Math.ceil(remainingSeconds / 60);
+    throw new ApiError(429, `Too many wrong attempts. MPIN is locked. Please try again in ${remainingMinutes} minute(s).`);
+  }
+
+  // Verify MPIN
+  const isMatch = await bcrypt.compare(mpin, user.mpin);
+  if (!isMatch) {
+    user.mpinAttempts = (user.mpinAttempts || 0) + 1;
+
+    if (user.mpinAttempts >= 5) {
+      user.mpinLockedUntil = new Date(Date.now() + 15 * 60 * 1000); // 15 mins lock
+      user.mpinAttempts = 0;
+      await user.save();
+      throw new ApiError(429, 'Too many incorrect attempts. Account locked for 15 minutes.');
+    }
+
+    await user.save();
+    const attemptsLeft = 5 - user.mpinAttempts;
+    throw new ApiError(401, `Incorrect MPIN. ${attemptsLeft} attempt(s) remaining.`);
+  }
+
+  // Reset attempts on success
+  user.mpinAttempts = 0;
+  user.mpinLockedUntil = undefined;
+
+  // Refresh auth tokens so user's session remains fresh
+  const tokenPayload = { userId: user._id.toString(), role: user.role };
+  const accessToken = generateAccessToken(tokenPayload);
+  const refreshToken = generateRefreshToken(tokenPayload);
+
+  // Update session if deviceId is provided
+  const targetDeviceId = deviceId || 'generic-device';
+  const existingSessionIndex = user.sessions.findIndex((s: any) => s.deviceId === targetDeviceId);
+  if (existingSessionIndex > -1) {
+    user.sessions[existingSessionIndex].refreshToken = refreshToken;
+    user.sessions[existingSessionIndex].lastActive = new Date();
+  } else {
+    user.sessions.push({
+      deviceId: targetDeviceId,
+      refreshToken,
+      lastActive: new Date(),
+    });
+  }
+
+  await user.save();
+
+  res.status(200).json(new ApiResponse(200, 'MPIN verified successfully. App unlocked.', {
+    user: {
+      _id: user._id,
+      phoneNumber: user.phoneNumber,
+      name: user.name,
+      role: user.role,
+      isMpinSet: true,
+    },
+    accessToken,
+    refreshToken,
+  }));
+});
+
+/**
+ * @route   POST /api/v1/auth/change-mpin
+ * @desc    Change existing MPIN using old MPIN
+ * @access  Protected
+ */
+export const changeMpin = asyncHandler(async (req: Request, res: Response) => {
+  const { oldMpin, newMpin } = req.body;
+  const userId = req.user?._id;
+
+  const user = await User.findById(userId).select('+mpin');
+  if (!user) {
+    throw new ApiError(404, 'User not found');
+  }
+
+  if (!user.isMpinSet || !user.mpin) {
+    throw new ApiError(400, 'No MPIN is currently set. Please use Set MPIN instead.');
+  }
+
+  // Verify old MPIN
+  const isMatch = await bcrypt.compare(oldMpin, user.mpin);
+  if (!isMatch) {
+    throw new ApiError(401, 'Incorrect old MPIN');
+  }
+
+  // Hash new MPIN
+  const hashedNewMpin = await bcrypt.hash(newMpin, 10);
+  user.mpin = hashedNewMpin;
+  user.mpinAttempts = 0;
+  user.mpinLockedUntil = undefined;
+  await user.save();
+
+  res.status(200).json(new ApiResponse(200, 'MPIN changed successfully', {
+    isMpinSet: true,
+  }));
+});
+
+/**
+ * @route   POST /api/v1/auth/forgot-mpin
+ * @desc    Reset forgotten MPIN using OTP verification
+ * @access  Public
+ */
+export const forgotMpin = asyncHandler(async (req: Request, res: Response) => {
+  const { phoneNumber, otp, newMpin } = req.body;
+
+  const user = await User.findOne({ phoneNumber }).select('+mpin');
+  if (!user) {
+    throw new ApiError(404, 'User not found with this phone number');
+  }
+
+  // Verify OTP
+  const validOtp = await OTP.findOne({
+    phoneNumber,
+    otp,
+    expiresAt: { $gt: new Date() },
+  });
+
+  if (!validOtp) {
+    throw new ApiError(400, 'Invalid or expired OTP');
+  }
+
+  // Delete used OTP
+  await OTP.deleteMany({ phoneNumber });
+
+  // Hash new MPIN
+  const hashedNewMpin = await bcrypt.hash(newMpin, 10);
+  user.mpin = hashedNewMpin;
+  user.isMpinSet = true;
+  user.mpinAttempts = 0;
+  user.mpinLockedUntil = undefined;
+
+  // Issue new session tokens
+  const tokenPayload = { userId: user._id.toString(), role: user.role };
+  const accessToken = generateAccessToken(tokenPayload);
+  const refreshToken = generateRefreshToken(tokenPayload);
+
+  await user.save();
+
+  res.status(200).json(new ApiResponse(200, 'MPIN reset successfully. You are now logged in.', {
+    user: {
+      _id: user._id,
+      phoneNumber: user.phoneNumber,
+      name: user.name,
+      role: user.role,
+      isMpinSet: true,
+    },
+    accessToken,
+    refreshToken,
+  }));
+});
+

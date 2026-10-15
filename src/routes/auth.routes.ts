@@ -1,9 +1,15 @@
 import { Router } from 'express';
-import { sendOTP, verifyOTP, refreshToken, logout, logoutAllDevices, getActiveSessions, verifyGender } from '../controllers/auth.controller';
+import { 
+  sendOTP, verifyOTP, refreshToken, logout, logoutAllDevices, getActiveSessions, verifyGender,
+  setMpin, verifyMpin, changeMpin, forgotMpin
+} from '../controllers/auth.controller';
 import { validate } from '../middlewares/validate.middleware';
 import { protect } from '../middlewares/auth.middleware';
 import { upload } from '../middlewares/upload.middleware';
-import { sendOTPSchema, verifyOTPSchema, refreshTokenSchema, logoutSchema } from '../validations/auth.validation';
+import { 
+  sendOTPSchema, verifyOTPSchema, refreshTokenSchema, logoutSchema,
+  setMpinSchema, verifyMpinSchema, changeMpinSchema, forgotMpinSchema
+} from '../validations/auth.validation';
 
 const router = Router();
 
@@ -31,6 +37,12 @@ router.post(
   verifyOTP
 );
 
+// MPIN Routes (App Quick Lock & Unlock)
+router.post('/set-mpin', protect, validate(setMpinSchema), setMpin);
+router.post('/verify-mpin', validate(verifyMpinSchema), verifyMpin);
+router.post('/change-mpin', protect, validate(changeMpinSchema), changeMpin);
+router.post('/forgot-mpin', validate(forgotMpinSchema), forgotMpin);
+
 router.post(
   '/refresh-token',
   validate(refreshTokenSchema),
@@ -53,3 +65,4 @@ router.post('/logout-all', protect, logoutAllDevices);
 router.get('/sessions', protect, getActiveSessions);
 
 export default router;
+
