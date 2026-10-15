@@ -5,6 +5,7 @@ import { ApiResponse } from '../utils/ApiResponse';
 import { ApiError } from '../utils/ApiError';
 import { Ride } from '../models/Ride';
 import { RiderProfile } from '../models/RiderProfile';
+import { PassengerProfile } from '../models/PassengerProfile';
 import { User } from '../models/User';
 import { PricingRule } from '../models/PricingRule';
 import { calculateFare } from '../utils/fareCalculator';
@@ -54,7 +55,7 @@ export const estimateFare = asyncHandler(async (req: Request, res: Response) => 
  * @access  Protected (passenger)
  */
 export const requestRide = asyncHandler(async (req: Request, res: Response) => {
-  const { pickup, drop, paymentMethod, childProfileId, city } = req.body;
+  const { pickup, drop, paymentMethod, childProfileId, city, applyWallet } = req.body;
   const { distanceKm, durationMins } = await mapsService.getDistanceAndDuration(
     pickup.latitude, pickup.longitude, drop.latitude, drop.longitude
   );
@@ -75,6 +76,40 @@ export const requestRide = asyncHandler(async (req: Request, res: Response) => {
   }
 
   const fare = calculateFare({ distanceKm, durationMinutes: durationMins, ...pricingOverrides });
+
+  // Handle Wallet Balance deduction if applyWallet is selected
+  let walletAmountUsed = 0;
+  let remainingDue = fare.totalFare;
+  let initialPaymentStatus = PaymentStatus.PENDING;
+  let finalPaymentMethod = paymentMethod || PaymentMethod.CASH;
+
+  if (applyWallet) {
+    const passengerProfile = await PassengerProfile.findOne({ user: req.user?._id });
+    const availableWallet = passengerProfile?.walletBalance || 0;
+
+    if (passengerProfile && availableWallet > 0) {
+      walletAmountUsed = Math.min(fare.totalFare, availableWallet);
+      remainingDue = Math.max(0, Number((fare.totalFare - walletAmountUsed).toFixed(2)));
+
+      // Deduct applied wallet balance immediately
+      passengerProfile.walletBalance = Number((availableWallet - walletAmountUsed).toFixed(2));
+      await passengerProfile.save();
+
+      await WalletTransaction.create({
+        user: req.user?._id,
+        type: WalletTransactionType.DEBIT,
+        amount: walletAmountUsed,
+        description: `Wallet balance applied to Ride booking`,
+        category: 'ride_fare',
+        balanceAfter: passengerProfile.walletBalance,
+      });
+
+      if (remainingDue === 0) {
+        finalPaymentMethod = PaymentMethod.WALLET;
+        initialPaymentStatus = PaymentStatus.PAID;
+      }
+    }
+  }
 
   let initialAssignedRider: import('mongoose').Types.ObjectId | undefined;
   let assignmentExpiresAt: Date | undefined;
@@ -110,7 +145,11 @@ export const requestRide = asyncHandler(async (req: Request, res: Response) => {
     passenger: req.user?._id,
     pickup,
     drop,
-    paymentMethod,
+    paymentMethod: finalPaymentMethod,
+    paymentStatus: initialPaymentStatus,
+    applyWallet: Boolean(applyWallet),
+    walletAmountUsed,
+    remainingAmountToPay: remainingDue,
     childProfile: childProfileId || undefined,
     estimatedFare: fare.totalFare,
     distanceKm,
@@ -369,56 +408,72 @@ export const completeRide = asyncHandler(async (req: Request, res: Response) => 
   if (!ride) throw new ApiError(404, 'Ride not found or not started');
   ride.rideEndedAt = new Date();
 
-  // If already paid online, skip recalculating fare and commission
-  if (ride.paymentStatus === PaymentStatus.PAID) {
+  // Calculate waiting charges (₹2/min after 3 min free wait)
+  if (ride.riderArrivedAt && ride.rideStartedAt) {
+    const waitMs = ride.rideStartedAt.getTime() - ride.riderArrivedAt.getTime();
+    const waitMins = Math.floor(waitMs / 60000);
+    const chargeableMins = Math.max(0, waitMins - 3); // 3 min free
+    ride.waitingCharges = chargeableMins * 2; // ₹2/min
+  }
+
+  ride.finalFare = (ride.estimatedFare || 0) + (ride.waitingCharges || 0);
+
+  // Calculate Platform Commission from Database Config (strictly on finalFare, 0% on tip)
+  const config = await SystemConfig.findOne();
+  const platformCommissionRate = config?.platformCommissionRate ?? 20;
+
+  const finalFare = ride.finalFare || 0;
+  const platformCommission = Number((finalFare * (platformCommissionRate / 100)).toFixed(2));
+  const currentTip = ride.tipAmount || 0;
+  const riderEarnings = Number((finalFare - platformCommission + currentTip).toFixed(2));
+
+  ride.platformCommission = platformCommission;
+  ride.riderEarnings = riderEarnings;
+
+  // Split Payment calculation if passenger used wallet at booking
+  const walletUsed = ride.walletAmountUsed || 0;
+  const remainingDue = Math.max(0, Number((finalFare - walletUsed).toFixed(2)));
+  ride.remainingAmountToPay = remainingDue;
+
+  if (remainingDue === 0) {
+    // Fare completely covered by wallet balance (or already paid)
+    ride.paymentStatus = PaymentStatus.PAID;
     ride.status = RideStatus.PAYMENT_COMPLETED;
-    await ride.save();
+
+    // Settle rider earnings into RiderProfile.walletBalance immediately
+    const riderProfile = await RiderProfile.findOne({ user: ride.rider });
+    if (riderProfile) {
+      riderProfile.totalRides += 1;
+      riderProfile.totalEarnings += riderEarnings;
+      riderProfile.walletBalance = Number(((riderProfile.walletBalance || 0) + riderEarnings).toFixed(2));
+
+      await WalletTransaction.create({
+        user: ride.rider,
+        type: WalletTransactionType.CREDIT,
+        amount: riderEarnings,
+        description: `Full wallet payment settlement for Ride (ID: ${ride._id})`,
+        referenceId: ride._id.toString(),
+        category: 'ride_earnings',
+        balanceAfter: riderProfile.walletBalance,
+      });
+
+      await riderProfile.save();
+    }
   } else {
     ride.status = RideStatus.COMPLETED;
-    
-    // Calculate waiting charges (₹2/min after 3 min free wait)
-    if (ride.riderArrivedAt && ride.rideStartedAt) {
-      const waitMs = ride.rideStartedAt.getTime() - ride.riderArrivedAt.getTime();
-      const waitMins = Math.floor(waitMs / 60000);
-      const chargeableMins = Math.max(0, waitMins - 3); // 3 min free
-      ride.waitingCharges = chargeableMins * 2; // ₹2/min
-    }
-
-    ride.finalFare = (ride.estimatedFare || 0) + (ride.waitingCharges || 0);
-
-    // Calculate Platform Commission from Database Config
-    const config = await SystemConfig.findOne();
-    const platformCommissionRate = config?.platformCommissionRate ?? 20;
-
-    const finalFare = ride.finalFare || 0;
-    const platformCommission = Number((finalFare * (platformCommissionRate / 100)).toFixed(2));
-    const riderEarnings = Number((finalFare - platformCommission).toFixed(2));
-
-    ride.platformCommission = platformCommission;
-    ride.riderEarnings = riderEarnings;
 
     // Generate Razorpay Order for online payment if not cash
     if (ride.paymentMethod !== PaymentMethod.CASH) {
       try {
         const { paymentService } = await import('../services/payment.service');
-        const razorpayOrder = await paymentService.createOrder(finalFare, `Ride-${ride._id}`);
+        const razorpayOrder = await paymentService.createOrder(remainingDue, `Ride-${ride._id}`);
         ride.razorpayOrderId = razorpayOrder.id;
       } catch (err: any) {
         console.error('[Razorpay] Order creation failed:', err.message);
       }
     }
-    await ride.save();
   }
-
-  // Notify passenger that ride is complete
-  // try {
-  //   const passengerUser = ride.passenger as any;
-  //   if (passengerUser && passengerUser.phoneNumber) {
-  // await whatsappService.sendRideCompleted(passengerUser.phoneNumber, ride.finalFare);
-  //   }
-  // } catch (err) {
-  //   console.error('[FCM] Error notifying passenger of completion:', err);
-  // }
+  await ride.save();
 
   // Socket notification
   import('../sockets/tracking.socket').then(({ getIo }) => {
@@ -427,10 +482,14 @@ export const completeRide = asyncHandler(async (req: Request, res: Response) => 
       ioInstance.to(`passenger:${ride.passenger.toString()}`).emit('ride_completed', {
         rideId: ride._id,
         fare: ride.finalFare,
-        razorpayOrderId: ride.razorpayOrderId
+        walletAmountUsed: ride.walletAmountUsed || 0,
+        remainingAmountToPay: ride.remainingAmountToPay,
+        razorpayOrderId: ride.razorpayOrderId,
       });
     }
   });
+
+  const payableRemaining = ride.remainingAmountToPay !== undefined ? ride.remainingAmountToPay : ride.finalFare;
 
   res.status(200).json(new ApiResponse(200, 'Ride completed', {
     ride,
@@ -438,13 +497,17 @@ export const completeRide = asyncHandler(async (req: Request, res: Response) => 
       totalFare: ride.finalFare,
       baseFare: ride.estimatedFare,
       waitingCharges: ride.waitingCharges,
+      walletAmountUsed: ride.walletAmountUsed || 0,
+      remainingAmountToPay: payableRemaining,
       paymentMethod: ride.paymentMethod,
       razorpayOrderId: ride.razorpayOrderId,
       message: ride.paymentStatus === PaymentStatus.PAID 
-        ? `Payment of ₹${ride.finalFare} already received online.`
+        ? `Payment of ₹${ride.finalFare} already received (${ride.walletAmountUsed ? 'Wallet' : 'Online'}).`
         : (ride.paymentMethod === PaymentMethod.CASH
-            ? `Collect ₹${ride.finalFare} cash from the passenger.`
-            : 'Passenger is paying online via Razorpay in their app.'),
+            ? (ride.walletAmountUsed && ride.walletAmountUsed > 0
+                ? `Collect ₹${payableRemaining} cash from passenger (₹${ride.walletAmountUsed} paid via wallet).`
+                : `Collect ₹${ride.finalFare} cash from the passenger.`)
+            : `Passenger is paying remaining ₹${payableRemaining} online via Razorpay in their app.`),
     }
   }));
 });
@@ -458,8 +521,8 @@ export const confirmPayment = asyncHandler(async (req: Request, res: Response) =
   const ride = await Ride.findOne({ _id: req.params.id, rider: req.user?._id, status: { $in: [RideStatus.COMPLETED, RideStatus.STARTED] } });
   if (!ride) throw new ApiError(404, 'Ride not found');
   
-  if (ride.paymentMethod !== PaymentMethod.CASH) {
-    throw new ApiError(400, 'This ride was not marked as CASH');
+  if (ride.paymentMethod !== PaymentMethod.CASH && ride.paymentMethod !== PaymentMethod.WALLET) {
+    throw new ApiError(400, 'This ride was not marked for cash/wallet settlement');
   }
 
   // Idempotency check: if already confirmed, don't double debit/credit
@@ -472,12 +535,14 @@ export const confirmPayment = asyncHandler(async (req: Request, res: Response) =
   const config = await SystemConfig.findOne();
   const platformCommissionRate = config?.platformCommissionRate ?? 20;
   const finalFare = ride.finalFare || ride.estimatedFare || 0;
-  const platformCommission = ride.platformCommission !== undefined 
-    ? ride.platformCommission 
-    : Number((finalFare * (platformCommissionRate / 100)).toFixed(2));
-  const riderEarnings = ride.riderEarnings !== undefined 
-    ? ride.riderEarnings 
-    : Number((finalFare - platformCommission).toFixed(2));
+  const tipAmount = Math.max(0, Number(req.body.tipAmount || ride.tipAmount || 0));
+  if (tipAmount > 0) {
+    ride.tipAmount = tipAmount;
+  }
+
+  // Commission is strictly on finalFare. Zero commission on tip!
+  const platformCommission = Number((finalFare * (platformCommissionRate / 100)).toFixed(2));
+  const riderEarnings = Number((finalFare - platformCommission + tipAmount).toFixed(2));
 
   ride.finalFare = finalFare;
   ride.platformCommission = platformCommission;
@@ -486,22 +551,41 @@ export const confirmPayment = asyncHandler(async (req: Request, res: Response) =
   ride.status = RideStatus.PAYMENT_COMPLETED;
   await ride.save();
 
-  // Deduct platform commission from rider's wallet, add riderEarnings to totalEarnings (lifetime view), and increment totalRides
+  // Rider wallet adjustment:
+  // Cash collected by rider from passenger = cashDue + tipAmount (rider keeps cash tip in pocket)
+  // cashDue is remaining cash owed by passenger after wallet balance deduction
+  const cashDue = ride.remainingAmountToPay !== undefined ? ride.remainingAmountToPay : finalFare;
+  const walletAdjustment = Number(((riderEarnings - tipAmount) - cashDue).toFixed(2));
+
   const riderProfile = await RiderProfile.findOne({ user: ride.rider });
   if (riderProfile) {
     riderProfile.totalRides += 1;
     riderProfile.totalEarnings += riderEarnings;
-    riderProfile.walletBalance -= platformCommission;
+    riderProfile.walletBalance = Number(((riderProfile.walletBalance || 0) + walletAdjustment).toFixed(2));
 
-    await WalletTransaction.create({
-      user: ride.rider,
-      type: WalletTransactionType.DEBIT,
-      amount: platformCommission,
-      description: `Platform commission for Cash Ride (ID: ${ride._id})`,
-      referenceId: ride._id.toString(),
-      category: 'commission_deduction',
-      balanceAfter: riderProfile.walletBalance
-    });
+    if (walletAdjustment < 0) {
+      // Rider collected more cash than their earnings -> commission deducted from wallet
+      await WalletTransaction.create({
+        user: ride.rider,
+        type: WalletTransactionType.DEBIT,
+        amount: Math.abs(walletAdjustment),
+        description: `Platform commission for Cash Ride (ID: ${ride._id})`,
+        referenceId: ride._id.toString(),
+        category: 'commission_deduction',
+        balanceAfter: riderProfile.walletBalance
+      });
+    } else if (walletAdjustment > 0) {
+      // Passenger used wallet balance -> platform reimburses rider into their wallet
+      await WalletTransaction.create({
+        user: ride.rider,
+        type: WalletTransactionType.CREDIT,
+        amount: walletAdjustment,
+        description: `Wallet fare settlement for Ride (ID: ${ride._id})`,
+        referenceId: ride._id.toString(),
+        category: 'ride_earnings',
+        balanceAfter: riderProfile.walletBalance
+      });
+    }
     
     await riderProfile.save();
   }
@@ -540,12 +624,13 @@ export const verifyDigitalPayment = asyncHandler(async (req: Request, res: Respo
   const config = await SystemConfig.findOne();
   const platformCommissionRate = config?.platformCommissionRate ?? 20;
   const finalFare = ride.finalFare || ride.estimatedFare || 0;
+  const tipAmount = ride.tipAmount || 0;
   const platformCommission = ride.platformCommission !== undefined 
     ? ride.platformCommission 
     : Number((finalFare * (platformCommissionRate / 100)).toFixed(2));
   const riderEarnings = ride.riderEarnings !== undefined 
     ? ride.riderEarnings 
-    : Number((finalFare - platformCommission).toFixed(2));
+    : Number((finalFare - platformCommission + tipAmount).toFixed(2));
 
   ride.finalFare = finalFare;
   ride.platformCommission = platformCommission;
@@ -560,13 +645,13 @@ export const verifyDigitalPayment = asyncHandler(async (req: Request, res: Respo
   if (riderProfile) {
     riderProfile.totalRides += 1;
     riderProfile.totalEarnings += riderEarnings;
-    riderProfile.walletBalance += riderEarnings;
+    riderProfile.walletBalance = Number(((riderProfile.walletBalance || 0) + riderEarnings).toFixed(2));
 
     await WalletTransaction.create({
       user: ride.rider,
       type: WalletTransactionType.CREDIT,
       amount: riderEarnings,
-      description: `Earnings for Digital Ride (Txn: ${razorpay_payment_id})`,
+      description: `Earnings for Digital Ride (Txn: ${razorpay_payment_id})${tipAmount > 0 ? ` (incl. ₹${tipAmount} tip)` : ''}`,
       referenceId: ride._id.toString(),
       category: 'ride_earnings',
       balanceAfter: riderProfile.walletBalance
@@ -581,7 +666,9 @@ export const verifyDigitalPayment = asyncHandler(async (req: Request, res: Respo
     if (ioInstance && ride.rider) {
       ioInstance.to(`rider:${ride.rider.toString()}`).emit('payment_received', {
         rideId: ride._id,
-        amount: ride.finalFare,
+        amount: (ride.remainingAmountToPay !== undefined ? ride.remainingAmountToPay : finalFare) + tipAmount,
+        fare: finalFare,
+        tip: tipAmount,
       });
     }
   });
@@ -607,6 +694,26 @@ export const cancelRide = asyncHandler(async (req: Request, res: Response) => {
 
   ride.status = cancelledBy === CancellationBy.PASSENGER ? RideStatus.PASSENGER_CANCELLED : RideStatus.RIDER_CANCELLED;
   ride.cancellation = { cancelledBy, reason, cancelledAt: new Date() };
+
+  // Refund applied wallet balance if ride is cancelled before completion
+  if (ride.walletAmountUsed && ride.walletAmountUsed > 0) {
+    const passengerProfile = await PassengerProfile.findOne({ user: ride.passenger });
+    if (passengerProfile) {
+      passengerProfile.walletBalance = Number(((passengerProfile.walletBalance || 0) + ride.walletAmountUsed).toFixed(2));
+      await passengerProfile.save();
+
+      await WalletTransaction.create({
+        user: ride.passenger,
+        type: WalletTransactionType.CREDIT,
+        amount: ride.walletAmountUsed,
+        description: `Refund for cancelled ride (ID: ${ride._id})`,
+        referenceId: ride._id.toString(),
+        category: 'refund',
+        balanceAfter: passengerProfile.walletBalance,
+      });
+    }
+  }
+
   await ride.save();
 
   // Notify the other party if assigned, or broadcast cancellation
@@ -952,3 +1059,216 @@ export const getHighDemandAreas = asyncHandler(async (req: Request, res: Respons
   // If you only want the absolute highest demand location, you can take demandPoints[0]
   res.status(200).json(new ApiResponse(200, 'High demand areas fetched', demandPoints));
 });
+
+/**
+ * @route   PUT /api/v1/ride/:id/apply-wallet
+ * @desc    Passenger applies or unapplies wallet balance to an active/completed ride before paying
+ * @access  Protected (Passenger)
+ */
+export const applyWalletToRide = asyncHandler(async (req: Request, res: Response) => {
+  const { apply = true } = req.body;
+  const rideId = req.params.id;
+
+  const ride = await Ride.findById(rideId);
+  if (!ride) throw new ApiError(404, 'Ride not found');
+
+  if (ride.passenger.toString() !== req.user?._id.toString()) {
+    throw new ApiError(403, 'Not authorized for this ride');
+  }
+
+  // Cannot modify if ride was cancelled
+  if (
+    ride.status === RideStatus.PASSENGER_CANCELLED ||
+    ride.status === RideStatus.RIDER_CANCELLED
+  ) {
+    throw new ApiError(400, 'Cannot apply wallet balance to a cancelled ride');
+  }
+
+  // If already fully paid and finalized, prevent altering
+  if (ride.paymentStatus === PaymentStatus.PAID && ride.status === RideStatus.PAYMENT_COMPLETED) {
+    throw new ApiError(400, 'Payment for this ride is already completed');
+  }
+
+  const passengerProfile = await PassengerProfile.findOne({ user: req.user?._id });
+  if (!passengerProfile) {
+    throw new ApiError(404, 'Passenger profile not found');
+  }
+
+  const totalFare = ride.finalFare || ride.estimatedFare || 0;
+  if (totalFare <= 0) {
+    throw new ApiError(400, 'Invalid ride fare');
+  }
+
+  const currentWalletUsed = ride.walletAmountUsed || 0;
+
+  if (apply) {
+    // Passenger wants to apply wallet balance
+    const effectiveAvailableBalance = Number(((passengerProfile.walletBalance || 0) + currentWalletUsed).toFixed(2));
+
+    if (effectiveAvailableBalance <= 0) {
+      throw new ApiError(400, 'Insufficient wallet balance to apply');
+    }
+
+    const newWalletToUse = Math.min(totalFare, effectiveAvailableBalance);
+    const diff = Number((newWalletToUse - currentWalletUsed).toFixed(2));
+
+    if (diff > 0) {
+      passengerProfile.walletBalance = Number(((passengerProfile.walletBalance || 0) - diff).toFixed(2));
+      await passengerProfile.save();
+
+      await WalletTransaction.create({
+        user: req.user?._id,
+        type: WalletTransactionType.DEBIT,
+        amount: diff,
+        description: `Wallet balance applied to Ride #${ride._id}`,
+        category: 'ride_fare',
+        balanceAfter: passengerProfile.walletBalance,
+        referenceId: ride._id.toString(),
+      });
+    } else if (diff < 0) {
+      const refund = Math.abs(diff);
+      passengerProfile.walletBalance = Number(((passengerProfile.walletBalance || 0) + refund).toFixed(2));
+      await passengerProfile.save();
+
+      await WalletTransaction.create({
+        user: req.user?._id,
+        type: WalletTransactionType.CREDIT,
+        amount: refund,
+        description: `Wallet balance adjustment for Ride #${ride._id}`,
+        category: 'refund',
+        balanceAfter: passengerProfile.walletBalance,
+        referenceId: ride._id.toString(),
+      });
+    }
+
+    const remainingDue = Math.max(0, Number((totalFare - newWalletToUse).toFixed(2)));
+
+    ride.applyWallet = true;
+    ride.walletAmountUsed = newWalletToUse;
+    ride.remainingAmountToPay = remainingDue;
+
+    if (remainingDue === 0) {
+      ride.paymentMethod = PaymentMethod.WALLET;
+
+      // If ride is already completed by rider, mark PAID & settle rider earnings immediately
+      if (ride.status === RideStatus.COMPLETED) {
+        ride.paymentStatus = PaymentStatus.PAID;
+        ride.status = RideStatus.PAYMENT_COMPLETED;
+
+        const config = await SystemConfig.findOne();
+        const platformCommissionRate = config?.platformCommissionRate ?? 20;
+        const commission = Number((totalFare * (platformCommissionRate / 100)).toFixed(2));
+        const tip = ride.tipAmount || 0;
+        const riderEarnings = Number((totalFare - commission + tip).toFixed(2));
+
+        ride.platformCommission = commission;
+        ride.riderEarnings = riderEarnings;
+
+        if (ride.rider) {
+          const riderProfile = await RiderProfile.findOne({ user: ride.rider });
+          if (riderProfile) {
+            riderProfile.totalRides += 1;
+            riderProfile.totalEarnings += riderEarnings;
+            riderProfile.walletBalance = Number(((riderProfile.walletBalance || 0) + riderEarnings).toFixed(2));
+
+            await WalletTransaction.create({
+              user: ride.rider,
+              type: WalletTransactionType.CREDIT,
+              amount: riderEarnings,
+              description: `Full wallet payment settlement for Ride #${ride._id}`,
+              referenceId: ride._id.toString(),
+              category: 'ride_earnings',
+              balanceAfter: riderProfile.walletBalance,
+            });
+
+            await riderProfile.save();
+          }
+        }
+      }
+    }
+
+    await ride.save();
+
+    // Socket notification to rider with updated payable cash
+    if (ride.rider) {
+      import('../sockets/tracking.socket').then(({ getIo }) => {
+        const ioInstance = getIo();
+        if (ioInstance) {
+          ioInstance.to(`rider:${ride.rider}`).emit('ride_payment_updated', {
+            rideId: ride._id,
+            totalFare,
+            walletAmountUsed: newWalletToUse,
+            remainingAmountToPay: remainingDue,
+            paymentStatus: ride.paymentStatus,
+          });
+        }
+      });
+    }
+
+    res.status(200).json(new ApiResponse(200, 'Wallet balance applied successfully', {
+      rideId: ride._id,
+      totalFare,
+      walletAmountUsed: newWalletToUse,
+      remainingAmountToPay: remainingDue,
+      passengerWalletBalance: passengerProfile.walletBalance,
+      paymentStatus: ride.paymentStatus,
+      status: ride.status,
+    }));
+  } else {
+    // Passenger wants to unapply wallet balance
+    if (currentWalletUsed <= 0) {
+      throw new ApiError(400, 'No wallet balance is currently applied to this ride');
+    }
+
+    passengerProfile.walletBalance = Number(((passengerProfile.walletBalance || 0) + currentWalletUsed).toFixed(2));
+    await passengerProfile.save();
+
+    await WalletTransaction.create({
+      user: req.user?._id,
+      type: WalletTransactionType.CREDIT,
+      amount: currentWalletUsed,
+      description: `Wallet balance unapplied from Ride #${ride._id}`,
+      category: 'refund',
+      balanceAfter: passengerProfile.walletBalance,
+      referenceId: ride._id.toString(),
+    });
+
+    ride.applyWallet = false;
+    ride.walletAmountUsed = 0;
+    ride.remainingAmountToPay = totalFare;
+
+    if (ride.paymentMethod === PaymentMethod.WALLET) {
+      ride.paymentMethod = PaymentMethod.CASH;
+      ride.paymentStatus = PaymentStatus.PENDING;
+    }
+
+    await ride.save();
+
+    // Socket notification to rider
+    if (ride.rider) {
+      import('../sockets/tracking.socket').then(({ getIo }) => {
+        const ioInstance = getIo();
+        if (ioInstance) {
+          ioInstance.to(`rider:${ride.rider}`).emit('ride_payment_updated', {
+            rideId: ride._id,
+            totalFare,
+            walletAmountUsed: 0,
+            remainingAmountToPay: totalFare,
+            paymentStatus: ride.paymentStatus,
+          });
+        }
+      });
+    }
+
+    res.status(200).json(new ApiResponse(200, 'Wallet balance removed from ride', {
+      rideId: ride._id,
+      totalFare,
+      walletAmountUsed: 0,
+      remainingAmountToPay: totalFare,
+      passengerWalletBalance: passengerProfile.walletBalance,
+      paymentStatus: ride.paymentStatus,
+      status: ride.status,
+    }));
+  }
+});
+

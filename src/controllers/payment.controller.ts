@@ -3,9 +3,10 @@ import { asyncHandler } from '../utils/asyncHandler';
 import { ApiResponse } from '../utils/ApiResponse';
 import { ApiError } from '../utils/ApiError';
 import { RiderProfile } from '../models/RiderProfile';
+import { PassengerProfile } from '../models/PassengerProfile';
 import { User } from '../models/User';
 import { WalletTransaction } from '../models/WalletTransaction';
-import { WalletTransactionType, PaymentMethod, PaymentStatus, RideStatus } from '../config/constants';
+import { WalletTransactionType, PaymentMethod, PaymentStatus, RideStatus, UserRole } from '../config/constants';
 import { Ride } from '../models/Ride';
 import { SystemConfig } from '../models/SystemConfig';
 import mongoose from 'mongoose';
@@ -198,8 +199,46 @@ export const calculateMonthlyStatementData = async (userId: string, monthParam?:
  * @access  Protected
  */
 export const getWallet = asyncHandler(async (req: Request, res: Response) => {
-  const profile = await RiderProfile.findOne({ user: req.user?._id });
-  if (!profile) throw new ApiError(404, 'Rider profile not found');
+  const userId = req.user?._id;
+  const userRole = req.user?.role;
+
+  // If user is a passenger, return passenger wallet
+  if (userRole === UserRole.PASSENGER) {
+    let passengerProfile = await PassengerProfile.findOne({ user: userId });
+    if (!passengerProfile) {
+      passengerProfile = await PassengerProfile.create({ user: userId });
+    }
+    res.status(200).json(
+      new ApiResponse(200, 'Wallet fetched successfully', {
+        walletBalance: passengerProfile.walletBalance || 0,
+        cashDues: 0,
+        duesOutstanding: 0,
+        totalEarnings: 0,
+        currency: 'INR',
+      })
+    );
+    return;
+  }
+
+  // Rider wallet logic
+  let profile = await RiderProfile.findOne({ user: userId });
+  if (!profile) {
+    // Graceful fallback: check if user is a passenger registered with role 'both'
+    const passengerProfile = await PassengerProfile.findOne({ user: userId });
+    if (passengerProfile) {
+      res.status(200).json(
+        new ApiResponse(200, 'Wallet fetched successfully', {
+          walletBalance: passengerProfile.walletBalance || 0,
+          cashDues: 0,
+          duesOutstanding: 0,
+          totalEarnings: 0,
+          currency: 'INR',
+        })
+      );
+      return;
+    }
+    throw new ApiError(404, 'Rider profile not found');
+  }
 
   // Sync lifetime totalEarnings and totalRides from completed rides if profile was lagging
   const riderId = req.user?._id;
@@ -259,17 +298,29 @@ export const verifyTopupPayment = asyncHandler(async (req: Request, res: Respons
   const isValid = paymentService.verifyPaymentSignature(razorpay_order_id, razorpay_payment_id, razorpay_signature);
   if (!isValid) throw new ApiError(400, 'Invalid payment signature');
 
-  // Credit wallet
-  const profile = await RiderProfile.findOneAndUpdate(
-    { user: req.user?._id },
-    { $inc: { walletBalance: amount } },
-    { new: true }
-  );
+  const userId = req.user?._id;
+  const userRole = req.user?.role;
+  let newBalance = amount;
 
-  const newBalance = profile?.walletBalance || amount;
+  if (userRole === UserRole.PASSENGER) {
+    const passengerProfile = await PassengerProfile.findOneAndUpdate(
+      { user: userId },
+      { $inc: { walletBalance: amount } },
+      { new: true, upsert: true }
+    );
+    newBalance = passengerProfile.walletBalance || amount;
+  } else {
+    // Rider wallet topup
+    const profile = await RiderProfile.findOneAndUpdate(
+      { user: userId },
+      { $inc: { walletBalance: amount } },
+      { new: true }
+    );
+    newBalance = profile?.walletBalance || amount;
+  }
 
   await WalletTransaction.create({
-    user: req.user?._id,
+    user: userId,
     type: WalletTransactionType.CREDIT,
     amount,
     description: `Wallet top-up (Txn: ${razorpay_payment_id})`,
@@ -432,21 +483,76 @@ export const createRideOrder = asyncHandler(async (req: Request, res: Response) 
     throw new ApiError(403, 'Not authorized for this ride');
   }
 
-  let amountToPay = ride.finalFare;
-  if (!amountToPay) {
-    amountToPay = ride.estimatedFare || 0;
-    ride.finalFare = amountToPay;
-    
-    // Calculate Commission reliably from Database
-    const config = await SystemConfig.findOne();
-    const platformCommissionRate = config?.platformCommissionRate ?? 20;
-    ride.platformCommission = Number(((amountToPay as number) * (platformCommissionRate / 100)).toFixed(2));
-    ride.riderEarnings = Number(((amountToPay as number) - ride.platformCommission).toFixed(2));
-    await ride.save();
+  const tipAmount = Math.max(0, Number(req.body.tipAmount || 0));
+  if (tipAmount > 0) {
+    ride.tipAmount = tipAmount;
   }
 
-  if (!amountToPay || amountToPay <= 0) {
-    throw new ApiError(400, 'Invalid fare amount');
+  let finalFare = ride.finalFare;
+  if (!finalFare) {
+    finalFare = ride.estimatedFare || 0;
+    ride.finalFare = finalFare;
+  }
+
+  // Calculate Commission reliably from Database (strictly on finalFare, 0% on tip)
+  const config = await SystemConfig.findOne();
+  const platformCommissionRate = config?.platformCommissionRate ?? 20;
+  const platformCommission = Number((finalFare * (platformCommissionRate / 100)).toFixed(2));
+  const currentTip = ride.tipAmount || 0;
+  const riderEarnings = Number((finalFare - platformCommission + currentTip).toFixed(2));
+
+  ride.platformCommission = platformCommission;
+  ride.riderEarnings = riderEarnings;
+
+  // Split payment: only bill remaining amount plus tip
+  const walletUsed = ride.walletAmountUsed || 0;
+  const payableRemaining = ride.remainingAmountToPay !== undefined 
+    ? ride.remainingAmountToPay 
+    : Math.max(0, Number((finalFare - walletUsed).toFixed(2)));
+  ride.remainingAmountToPay = payableRemaining;
+
+  const amountToPay = Number((payableRemaining + currentTip).toFixed(2));
+
+  if (amountToPay <= 0) {
+    // Already fully covered by wallet balance and no tip
+    ride.paymentStatus = PaymentStatus.PAID;
+    ride.status = RideStatus.PAYMENT_COMPLETED;
+    await ride.save();
+
+    // Credit rider wallet if rider assigned
+    if (ride.rider) {
+      const profile = await RiderProfile.findOneAndUpdate(
+        { user: ride.rider },
+        { 
+          $inc: { 
+            walletBalance: riderEarnings,
+            totalEarnings: riderEarnings,
+            totalRides: 1
+          } 
+        },
+        { new: true }
+      );
+      if (profile) {
+        await WalletTransaction.create({
+          user: ride.rider,
+          type: WalletTransactionType.CREDIT,
+          amount: riderEarnings,
+          description: `Earnings for Ride: ${ride._id}`,
+          balanceAfter: profile.walletBalance,
+          referenceId: ride._id.toString(),
+          category: 'ride_earnings',
+        });
+      }
+    }
+
+    res.status(200).json(new ApiResponse(200, 'Ride already paid in full via wallet', { 
+      ride, 
+      fare: finalFare, 
+      walletAmountUsed: walletUsed,
+      tip: currentTip, 
+      total: 0 
+    }));
+    return;
   }
 
   const receipt = `receipt_ride_${id}`;
@@ -455,12 +561,19 @@ export const createRideOrder = asyncHandler(async (req: Request, res: Response) 
   ride.razorpayOrderId = order.id;
   await ride.save();
 
-  res.status(200).json(new ApiResponse(200, 'Ride payment order created', { order }));
+  res.status(200).json(new ApiResponse(200, 'Ride payment order created', { 
+    order, 
+    fare: finalFare, 
+    walletAmountUsed: walletUsed,
+    remainingAmountToPay: payableRemaining,
+    tip: currentTip, 
+    total: amountToPay 
+  }));
 });
 
 /**
  * @route   POST /api/v1/payment/ride/:id/verify
- * @desc    Verify Razorpay ride payment and credit rider
+ * @desc    Verify Razorpay ride payment and credit rider (including 100% tip without commission)
  * @access  Protected (Passenger)
  */
 export const verifyRidePayment = asyncHandler(async (req: Request, res: Response) => {
@@ -483,18 +596,20 @@ export const verifyRidePayment = asyncHandler(async (req: Request, res: Response
   }
 
   // Calculate fare, commission, and rider share reliably
+  // Platform commission is charged strictly on finalFare. 100% of tip goes to rider!
   const config = await SystemConfig.findOne();
   const platformCommissionRate = config?.platformCommissionRate ?? 20;
   const finalFare = ride.finalFare || ride.estimatedFare || 0;
+  const tipAmount = ride.tipAmount || 0;
   const platformCommission = ride.platformCommission !== undefined 
     ? ride.platformCommission 
     : Number((finalFare * (platformCommissionRate / 100)).toFixed(2));
-  const riderShare = ride.riderEarnings !== undefined 
-    ? ride.riderEarnings 
-    : Number((finalFare - platformCommission).toFixed(2));
+  const riderShare = Number((finalFare - platformCommission + tipAmount).toFixed(2));
 
   // Update ride payment status
-  ride.paymentMethod = PaymentMethod.UPI;
+  if (ride.paymentMethod !== PaymentMethod.WALLET) {
+    ride.paymentMethod = PaymentMethod.UPI;
+  }
   ride.paymentStatus = PaymentStatus.PAID;
   ride.status = RideStatus.PAYMENT_COMPLETED;
   ride.razorpayPaymentId = razorpay_payment_id;
@@ -523,7 +638,7 @@ export const verifyRidePayment = asyncHandler(async (req: Request, res: Response
       user: ride.rider,
       type: WalletTransactionType.CREDIT,
       amount: riderShare,
-      description: `Earnings for Ride: ${ride._id}`,
+      description: `Earnings for Ride: ${ride._id}${tipAmount > 0 ? ` (incl. ₹${tipAmount} tip)` : ''}`,
       balanceAfter: newBalance,
       referenceId: ride._id.toString(),
       category: 'ride_earnings',
@@ -533,7 +648,12 @@ export const verifyRidePayment = asyncHandler(async (req: Request, res: Response
   // Emit socket event to notify Rider that payment is received
   import('../sockets/tracking.socket').then(({ ioInstance }) => {
     if (ioInstance && ride.rider) {
-      ioInstance.to(`rider:${ride.rider.toString()}`).emit('payment_received', { rideId: ride._id, amount: ride.finalFare });
+      ioInstance.to(`rider:${ride.rider.toString()}`).emit('payment_received', {
+        rideId: ride._id,
+        amount: finalFare + tipAmount,
+        fare: finalFare,
+        tip: tipAmount,
+      });
     }
   }).catch(err => console.error('[Socket] Error in verifyRidePayment:', err));
 

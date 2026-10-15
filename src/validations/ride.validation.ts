@@ -17,6 +17,8 @@ export const requestRideSchema = z.object({
   drop: coordinateSchema,
   paymentMethod: z.nativeEnum(PaymentMethod).default(PaymentMethod.CASH),
   childProfileId: z.string().optional(),
+  applyWallet: z.boolean().optional(),
+  city: z.string().optional(),
 });
 
 export const cancelRideSchema = z.object({
@@ -29,3 +31,8 @@ export const rateRideSchema = z.object({
   riderRating: z.number().min(1).max(5).optional(),
   riderComment: z.string().max(300).optional(),
 });
+
+export const applyWalletSchema = z.object({
+  apply: z.boolean().default(true),
+});
+

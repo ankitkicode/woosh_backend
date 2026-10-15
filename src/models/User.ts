@@ -1,9 +1,13 @@
 import mongoose, { Document, Schema } from 'mongoose';
 import { UserRole, Gender } from '../config/constants';
 
-interface IEmergencyContact {
+export interface IEmergencyContact {
   name: string;
   phoneNumber: string;
+  relationship?: 'parent' | 'sibling' | 'friend' | 'partner' | 'other' | string;
+  isPrimary?: boolean;
+  sendSosAlerts?: boolean;
+  autoShareRides?: boolean;
 }
 
 export interface ISession {
@@ -46,6 +50,10 @@ const userSchema = new Schema<IUser>(
       {
         name: { type: String, trim: true },
         phoneNumber: { type: String, trim: true },
+        relationship: { type: String, trim: true, default: 'other' },
+        isPrimary: { type: Boolean, default: false },
+        sendSosAlerts: { type: Boolean, default: true },
+        autoShareRides: { type: Boolean, default: false },
       },
     ],
     isAadhaarVerified: { type: Boolean, default: false },

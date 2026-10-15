@@ -1,0 +1,1206 @@
+{
+  "info": {
+    "name": "Woosh Passenger App APIs",
+    "description": "Complete Postman collection for Woosh Passenger App including Splash Face Scan (Gender Gatekeeper), Authentication, Unified Profile, Avatar Upload, Saved Places (Home/Work), Saved Payment Methods (UPI/Cards), Child Profiles, Ride Booking, Zero-Commission Tips, Passenger Wallet, SOS, and Support Tickets.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000/api/v1",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "passengerPhone",
+      "value": "9876543210",
+      "type": "string"
+    },
+    {
+      "key": "rideId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "savedPlaceId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "paymentMethodId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "childId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "ticketId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Splash Screen & Gender Verification",
+      "item": [
+        {
+          "name": "Verify Gender (Selfie Gatekeeper)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/verify-gender",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "verify-gender"]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "selfie",
+                  "type": "file",
+                  "description": "Female selfie image. If female, returns 200 OK allowing navigation to login. If male, returns 403 Forbidden blocking access.",
+                  "src": []
+                }
+              ]
+            },
+            "description": "Called immediately after Splash Screen. Gatekeeper that allows only female passengers to access Login/Registration screens."
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Authentication & Login",
+      "item": [
+        {
+          "name": "Send OTP (Passenger)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/send-otp",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "send-otp"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phoneNumber\": \"{{passengerPhone}}\",\n  \"role\": \"passenger\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Verify OTP & Auto-Set Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if(jsonData.data && jsonData.data.accessToken) {",
+                  "    pm.collectionVariables.set('token', jsonData.data.accessToken);",
+                  "    console.log('Passenger Token set successfully:', jsonData.data.accessToken);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/verify-otp",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "verify-otp"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phoneNumber\": \"{{passengerPhone}}\",\n  \"otp\": \"1234\",\n  \"role\": \"passenger\",\n  \"deviceId\": \"device_android_passenger_101\",\n  \"fcmToken\": \"fcm_token_passenger_example\"\n}"
+            },
+            "description": "Verifies OTP, automatically provisions PassengerProfile with isWomenVerified=true, and saves JWT token into collection variables."
+          }
+        },
+        {
+          "name": "Refresh Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/refresh-token",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "refresh-token"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"YOUR_REFRESH_TOKEN_HERE\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "logout"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deviceId\": \"device_android_passenger_101\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Passenger Profile & Preferences",
+      "item": [
+        {
+          "name": "Get Passenger Profile (Unified)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/passenger/profile",
+              "host": ["{{baseUrl}}"],
+              "path": ["passenger", "profile"]
+            },
+            "description": "Returns User details + PassengerProfile stats (wallet balance, rating, avatar, isWomenVerified, preferences, safety settings, referral code)."
+          }
+        },
+        {
+          "name": "Update Passenger Profile & Preferences",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/passenger/profile",
+              "host": ["{{baseUrl}}"],
+              "path": ["passenger", "profile"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Priya Sharma\",\n  \"email\": \"priya.sharma@example.com\",\n  \"dateOfBirth\": \"1998-05-15\",\n  \"city\": \"Indore\",\n  \"state\": \"Madhya Pradesh\",\n  \"preferences\": {\n    \"language\": \"English\",\n    \"rideUpdates\": true,\n    \"offersAndPromotions\": false,\n    \"whatsappUpdates\": true,\n    \"hideFullNameFromRiders\": true,\n    \"defaultPaymentMethod\": \"upi\"\n  },\n  \"safetySettings\": {\n    \"autoShareEveryRide\": false,\n    \"rideCheck\": true,\n    \"nightRideProtection\": true,\n    \"recordAudioOnSOS\": false\n  },\n  \"emergencyContacts\": [\n    {\n      \"name\": \"Rajesh Sharma\",\n      \"phoneNumber\": \"9898989898\",\n      \"relationship\": \"parent\",\n      \"isPrimary\": true,\n      \"sendSosAlerts\": true,\n      \"autoShareRides\": false\n    }\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "Upload Profile Image (/passenger/profile-image)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/passenger/profile-image",
+              "host": ["{{baseUrl}}"],
+              "path": ["passenger", "profile-image"]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "image",
+                  "type": "file",
+                  "description": "Passenger personal avatar picture (saved in PassengerProfile.profileImage).",
+                  "src": []
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Saved Places (Home / Work / Other)",
+      "item": [
+        {
+          "name": "Add Saved Place (Home)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if(jsonData.data && jsonData.data._id) {",
+                  "    pm.collectionVariables.set('savedPlaceId', jsonData.data._id);",
+                  "    console.log('Saved Place ID set:', jsonData.data._id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/passenger/saved-places",
+              "host": ["{{baseUrl}}"],
+              "path": ["passenger", "saved-places"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"home\",\n  \"title\": \"Home\",\n  \"address\": \"Flat 302, Green Valley Apartments, Vijay Nagar, Indore\",\n  \"latitude\": 22.7533,\n  \"longitude\": 75.8937,\n  \"landmark\": \"Near C21 Mall\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Add Saved Place (Work)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/passenger/saved-places",
+              "host": ["{{baseUrl}}"],
+              "path": ["passenger", "saved-places"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"work\",\n  \"title\": \"Office\",\n  \"address\": \"IT Park, Electronic Complex, Pardesipura, Indore\",\n  \"latitude\": 22.7410,\n  \"longitude\": 75.8750,\n  \"landmark\": \"Building B, 4th Floor\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Add Saved Place (Other / Gym)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/passenger/saved-places",
+              "host": ["{{baseUrl}}"],
+              "path": ["passenger", "saved-places"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"other\",\n  \"title\": \"Gold Gym\",\n  \"address\": \"AB Road, Near Industry House, Indore\",\n  \"latitude\": 22.7245,\n  \"longitude\": 75.8785\n}"
+            }
+          }
+        },
+        {
+          "name": "Get All Saved Places",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/passenger/saved-places",
+              "host": ["{{baseUrl}}"],
+              "path": ["passenger", "saved-places"]
+            }
+          }
+        },
+        {
+          "name": "Update Saved Place",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/passenger/saved-places/{{savedPlaceId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["passenger", "saved-places", "{{savedPlaceId}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"landmark\": \"Opposite Apollo Hospital Gate 2\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Delete Saved Place",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/passenger/saved-places/{{savedPlaceId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["passenger", "saved-places", "{{savedPlaceId}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Saved Payment Methods (UPI / Cards)",
+      "item": [
+        {
+          "name": "Add Saved UPI ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if(jsonData.data && jsonData.data._id) {",
+                  "    pm.collectionVariables.set('paymentMethodId', jsonData.data._id);",
+                  "    console.log('Payment Method ID set:', jsonData.data._id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/passenger/payment-methods",
+              "host": ["{{baseUrl}}"],
+              "path": ["passenger", "payment-methods"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"upi\",\n  \"upiId\": \"priya@okhdfcbank\",\n  \"isDefault\": true\n}"
+            }
+          }
+        },
+        {
+          "name": "Add Saved Card",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/passenger/payment-methods",
+              "host": ["{{baseUrl}}"],
+              "path": ["passenger", "payment-methods"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"card\",\n  \"cardLast4\": \"4242\",\n  \"cardBrand\": \"Visa\",\n  \"isDefault\": false\n}"
+            }
+          }
+        },
+        {
+          "name": "Get All Saved Payment Methods",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/passenger/payment-methods",
+              "host": ["{{baseUrl}}"],
+              "path": ["passenger", "payment-methods"]
+            }
+          }
+        },
+        {
+          "name": "Set Default Payment Method",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/passenger/payment-methods/{{paymentMethodId}}/default",
+              "host": ["{{baseUrl}}"],
+              "path": ["passenger", "payment-methods", "{{paymentMethodId}}", "default"]
+            }
+          }
+        },
+        {
+          "name": "Delete Payment Method",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/passenger/payment-methods/{{paymentMethodId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["passenger", "payment-methods", "{{paymentMethodId}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Child Profiles",
+      "item": [
+        {
+          "name": "Add Child Profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if(jsonData.data && jsonData.data._id) {",
+                  "    pm.collectionVariables.set('childId', jsonData.data._id);",
+                  "    console.log('Child ID set:', jsonData.data._id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/passenger/children",
+              "host": ["{{baseUrl}}"],
+              "path": ["passenger", "children"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Aarav Sharma\",\n  \"age\": 8,\n  \"schoolName\": \"Delhi Public School\",\n  \"emergencyContactName\": \"Rajesh Sharma\",\n  \"emergencyContactPhone\": \"9898989898\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Get All Child Profiles",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/passenger/children",
+              "host": ["{{baseUrl}}"],
+              "path": ["passenger", "children"]
+            }
+          }
+        },
+        {
+          "name": "Delete Child Profile",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/passenger/children/{{childId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["passenger", "children", "{{childId}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Ride Booking & Zero-Commission Tips",
+      "item": [
+        {
+          "name": "Get Supported Cities",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/cities",
+              "host": ["{{baseUrl}}"],
+              "path": ["cities"]
+            },
+            "description": "Public endpoint returning list of active operating cities (e.g. Indore) with pricing rules."
+          }
+        },
+        {
+          "name": "Get Nearby Online Riders",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride/nearby-riders?latitude=22.7533&longitude=75.8937",
+              "host": ["{{baseUrl}}"],
+              "path": ["ride", "nearby-riders"],
+              "query": [
+                {
+                  "key": "latitude",
+                  "value": "22.7533"
+                },
+                {
+                  "key": "longitude",
+                  "value": "75.8937"
+                }
+              ]
+            },
+            "description": "Returns verified, online female riders within 5km radius to show on Passenger map."
+          }
+        },
+        {
+          "name": "Get Current Active Ride",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride/active",
+              "host": ["{{baseUrl}}"],
+              "path": ["ride", "active"]
+            },
+            "description": "Returns current in-progress or requested ride for the logged-in passenger."
+          }
+        },
+        {
+          "name": "Estimate Ride Fare",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride/estimate",
+              "host": ["{{baseUrl}}"],
+              "path": ["ride", "estimate"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pickup\": {\n    \"address\": \"Vijay Nagar, Indore\",\n    \"latitude\": 22.7533,\n    \"longitude\": 75.8937\n  },\n  \"drop\": {\n    \"address\": \"Palasia Square, Indore\",\n    \"latitude\": 22.7245,\n    \"longitude\": 75.8820\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Request Ride (Passenger)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if(jsonData.data && jsonData.data._id) {",
+                  "    pm.collectionVariables.set('rideId', jsonData.data._id);",
+                  "    console.log('Ride ID set:', jsonData.data._id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride/request",
+              "host": ["{{baseUrl}}"],
+              "path": ["ride", "request"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pickup\": {\n    \"address\": \"Vijay Nagar, Indore\",\n    \"latitude\": 22.7533,\n    \"longitude\": 75.8937\n  },\n  \"drop\": {\n    \"address\": \"Palasia Square, Indore\",\n    \"latitude\": 22.7245,\n    \"longitude\": 75.8820\n  },\n  \"paymentMethod\": \"cash\",\n  \"applyWallet\": true,\n  \"city\": \"indore\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Get Current Active Ride Details",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride/{{rideId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["ride", "{{rideId}}"]
+            }
+          }
+        },
+        {
+          "name": "Apply / Remove Wallet Balance on Active Ride",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride/{{rideId}}/apply-wallet",
+              "host": ["{{baseUrl}}"],
+              "path": ["ride", "{{rideId}}", "apply-wallet"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"apply\": true\n}"
+            },
+            "description": "Passenger applies or unapplies (apply: false) available wallet balance to this active/completed ride before paying. Real-time updates cash dues for rider."
+          }
+        },
+        {
+          "name": "Create Ride Online Payment Order (with Tip)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payment/ride/{{rideId}}/order",
+              "host": ["{{baseUrl}}"],
+              "path": ["payment", "ride", "{{rideId}}", "order"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tipAmount\": 20\n}"
+            },
+            "description": "Creates Razorpay order for fare + tip. Platform commission is calculated strictly on fare. Tip has 0% commission."
+          }
+        },
+        {
+          "name": "Verify Ride Online Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payment/ride/{{rideId}}/verify",
+              "host": ["{{baseUrl}}"],
+              "path": ["payment", "ride", "{{rideId}}", "verify"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"razorpay_order_id\": \"order_demo_123\",\n  \"razorpay_payment_id\": \"pay_demo_123\",\n  \"razorpay_signature\": \"valid_signature_demo\"\n}"
+            },
+            "description": "Verifies online ride payment and credits Rider's wallet with fare earnings + 100% of the tip."
+          }
+        },
+        {
+          "name": "Trigger SOS Emergency Alert",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tracking/sos",
+              "host": ["{{baseUrl}}"],
+              "path": ["tracking", "sos"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rideId\": \"{{rideId}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Track Ride Live Location",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tracking/ride/{{rideId}}/location",
+              "host": ["{{baseUrl}}"],
+              "path": ["tracking", "ride", "{{rideId}}", "location"]
+            },
+            "description": "Polls real-time GPS coordinates of the assigned rider during pickup and in-progress ride."
+          }
+        },
+        {
+          "name": "Cancel Ride",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride/{{rideId}}/cancel",
+              "host": ["{{baseUrl}}"],
+              "path": ["ride", "{{rideId}}", "cancel"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Booked by mistake / Change of plans\"\n}"
+            },
+            "description": "Cancels requested or accepted ride. Auto-refunds applied wallet balance instantly."
+          }
+        },
+        {
+          "name": "Rate Ride & Driver",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride/{{rideId}}/rate",
+              "host": ["{{baseUrl}}"],
+              "path": ["ride", "{{rideId}}", "rate"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"passengerRating\": 5,\n  \"passengerComment\": \"Very polite and smooth driving!\"\n}"
+            },
+            "description": "Passenger rates rider (1-5 stars) and leaves review comments."
+          }
+        },
+        {
+          "name": "Get Ride History (Passenger)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride/history?page=1&limit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["ride", "history"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Fetches paginated past rides of the passenger."
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Passenger Wallet & Top-up",
+      "item": [
+        {
+          "name": "Get Passenger Wallet Balance",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payment/wallet",
+              "host": ["{{baseUrl}}"],
+              "path": ["payment", "wallet"]
+            },
+            "description": "Returns PassengerProfile.walletBalance (separate from Rider wallet)."
+          }
+        },
+        {
+          "name": "Create Wallet Top-up Order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payment/wallet/topup/order",
+              "host": ["{{baseUrl}}"],
+              "path": ["payment", "wallet", "topup", "order"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 500\n}"
+            }
+          }
+        },
+        {
+          "name": "Verify Wallet Top-up Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payment/wallet/topup/verify",
+              "host": ["{{baseUrl}}"],
+              "path": ["payment", "wallet", "topup", "verify"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"razorpay_order_id\": \"order_demo_topup\",\n  \"razorpay_payment_id\": \"pay_demo_topup\",\n  \"razorpay_signature\": \"valid_signature_demo\",\n  \"amount\": 500\n}"
+            }
+          }
+        },
+        {
+          "name": "Get Wallet Transactions History",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payment/transactions?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["payment", "transactions"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. Passenger Support & Complaints",
+      "item": [
+        {
+          "name": "Create Support Ticket",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if(jsonData.data && jsonData.data._id) {",
+                  "    pm.collectionVariables.set('ticketId', jsonData.data._id);",
+                  "    console.log('Ticket ID set:', jsonData.data._id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/passenger/support/tickets",
+              "host": ["{{baseUrl}}"],
+              "path": ["passenger", "support", "tickets"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rideId\": \"{{rideId}}\",\n  \"category\": \"fare_issue\",\n  \"subject\": \"Driver charged extra fare\",\n  \"message\": \"The driver took an unnecessary detour which increased the fare by ₹50.\",\n  \"priority\": \"HIGH\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Get All Passenger Support Tickets",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/passenger/support/tickets",
+              "host": ["{{baseUrl}}"],
+              "path": ["passenger", "support", "tickets"]
+            }
+          }
+        },
+        {
+          "name": "Get Support Ticket by ID (Chat Thread)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/passenger/support/tickets/{{ticketId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["passenger", "support", "tickets", "{{ticketId}}"]
+            }
+          }
+        },
+        {
+          "name": "Send Message in Support Ticket",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/passenger/support/tickets/{{ticketId}}/message",
+              "host": ["{{baseUrl}}"],
+              "path": ["passenger", "support", "tickets", "{{ticketId}}", "message"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Please review the route screenshot, I am waiting for refund.\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Close Support Ticket",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/passenger/support/tickets/{{ticketId}}/close",
+              "host": ["{{baseUrl}}"],
+              "path": ["passenger", "support", "tickets", "{{ticketId}}", "close"]
+            }
+          }
+        },
+        {
+          "name": "Submit Ride Dispute (Legacy)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/passenger/disputes",
+              "host": ["{{baseUrl}}"],
+              "path": ["passenger", "disputes"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category\": \"fare\",\n  \"subject\": \"Overcharged fare dispute\",\n  \"description\": \"I was overcharged by ₹40 due to bad GPS calculation.\",\n  \"rideId\": \"{{rideId}}\"\n}"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -5,13 +5,14 @@ import { ApiError } from '../utils/ApiError';
 import { User } from '../models/User';
 import { OTP } from '../models/OTP';
 import { RiderProfile } from '../models/RiderProfile';
+import { PassengerProfile } from '../models/PassengerProfile';
 import { generateOTP, getOTPExpiry } from '../utils/generateOTP';
 import {
   generateAccessToken,
   generateRefreshToken,
   verifyRefreshToken,
 } from '../utils/generateToken';
-import { OTP_EXPIRY_MINUTES, UserRole } from '../config/constants';
+import { OTP_EXPIRY_MINUTES, UserRole, Gender } from '../config/constants';
 import { smsService } from '../services/sms.service';
 import { whatsappService } from '../services/whatsapp.service';
 import { FaceService } from '../services/face.service';
@@ -142,11 +143,35 @@ export const verifyOTP = asyncHandler(async (req: Request, res: Response) => {
     user = await User.create({
       phoneNumber,
       role: role || UserRole.PASSENGER,
+      gender: (role === UserRole.PASSENGER || !role) ? Gender.FEMALE : undefined,
+      isFaceVerified: (role === UserRole.PASSENGER || !role) ? true : false,
     });
   } else if (user.role !== role && user.role !== UserRole.BOTH && user.role !== UserRole.ADMIN && user.role !== UserRole.SUPER_ADMIN) {
     // If the user already exists but with a different primary role, upgrade them to 'both'
     user.role = UserRole.BOTH;
     await user.save();
+  }
+
+  // Auto-provision PassengerProfile for passengers if not present
+  // Note: Passengers reaching OTP verification have already passed the Splash screen female face verification gate!
+  if (role === UserRole.PASSENGER || user.role === UserRole.PASSENGER || user.role === UserRole.BOTH) {
+    let existingPassengerProfile = await PassengerProfile.findOne({ user: user._id });
+    if (!existingPassengerProfile) {
+      const prefix = user.name ? user.name.replace(/[^a-zA-Z]/g, '').slice(0, 4).toUpperCase() : 'USER';
+      const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+      await PassengerProfile.create({
+        user: user._id,
+        referralCode: `WSH-${prefix}${randomSuffix}`,
+        isWomenVerified: true,
+        faceVerificationStatus: 'verified',
+        faceVerifiedAt: new Date(),
+      });
+    } else if (!existingPassengerProfile.isWomenVerified) {
+      existingPassengerProfile.isWomenVerified = true;
+      existingPassengerProfile.faceVerificationStatus = 'verified';
+      existingPassengerProfile.faceVerifiedAt = new Date();
+      await existingPassengerProfile.save();
+    }
   }
 
   // Handle Rider Profile drop-offs:
