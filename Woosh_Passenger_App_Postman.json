@@ -96,8 +96,9 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"phoneNumber\": \"{{passengerPhone}}\",\n  \"role\": \"passenger\"\n}"
-            }
+              "raw": "{\n  \"phoneNumber\": \"{{passengerPhone}}\",\n  \"role\": \"passenger\",\n  \"action\": \"login\"\n}"
+            },
+            "description": "Send OTP for Passenger. 'action' can be 'login' or 'register'."
           }
         },
         {
@@ -131,9 +132,35 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"phoneNumber\": \"{{passengerPhone}}\",\n  \"otp\": \"1234\",\n  \"role\": \"passenger\",\n  \"deviceId\": \"device_android_passenger_101\",\n  \"fcmToken\": \"fcm_token_passenger_example\"\n}"
+              "raw": "{\n  \"phoneNumber\": \"{{passengerPhone}}\",\n  \"otp\": \"1234\",\n  \"role\": \"passenger\",\n  \"deviceId\": \"device_android_passenger_101\",\n  \"fcmToken\": \"fcm_token_passenger_example\",\n  \"platform\": \"android\"\n}"
             },
             "description": "Verifies OTP, automatically provisions PassengerProfile with isWomenVerified=true, and saves JWT token into collection variables."
+          }
+        },
+        {
+          "name": "Update FCM Token & Platform",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/fcm-token",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "fcm-token"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fcmToken\": \"c_fresh_fcm_token_from_firebase\",\n  \"platform\": \"android\",\n  \"deviceId\": \"device_android_passenger_101\"\n}"
+            },
+            "description": "Called on app start or onTokenRefresh to register/update device FCM token and platform ('android' or 'ios')."
           }
         },
         {

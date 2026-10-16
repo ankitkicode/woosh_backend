@@ -14,6 +14,7 @@ export interface ISession {
   deviceId: string;
   fcmToken?: string;
   os?: string;
+  platform?: string;
   deviceModel?: string;
   refreshToken: string;
   lastActive: Date;
@@ -69,6 +70,7 @@ const userSchema = new Schema<IUser>(
         deviceId: { type: String, required: true },
         fcmToken: { type: String },
         os: { type: String },
+        platform: { type: String },
         deviceModel: { type: String },
         refreshToken: { type: String, required: true },
         lastActive: { type: Date, default: Date.now },

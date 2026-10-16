@@ -3,3 +3,5 @@ uploads/
 .env
 dist/
 .DS_Store
+public/*.json
+*.json.key

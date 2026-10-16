@@ -52,8 +52,9 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"phoneNumber\": \"9876543210\"\n}"
-            }
+              "raw": "{\n  \"phoneNumber\": \"9876543210\",\n  \"role\": \"rider\",\n  \"action\": \"login\"\n}"
+            },
+            "description": "Send OTP for Rider. 'action' can be 'login' (checks if account exists) or 'register' (checks if not already registered)."
           }
         },
         {
@@ -87,8 +88,34 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"phoneNumber\": \"9876543210\",\n  \"otp\": \"1234\",\n  \"role\": \"rider\",\n  \"deviceId\": \"device_android_99\",\n  \"fcmToken\": \"fcm_token_example_rider\"\n}"
+              "raw": "{\n  \"phoneNumber\": \"9876543210\",\n  \"otp\": \"1234\",\n  \"role\": \"rider\",\n  \"deviceId\": \"device_android_99\",\n  \"fcmToken\": \"fcm_token_example_rider\",\n  \"platform\": \"android\"\n}"
             }
+          }
+        },
+        {
+          "name": "Update FCM Token & Platform",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/fcm-token",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "fcm-token"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fcmToken\": \"c_fresh_fcm_token_from_firebase\",\n  \"platform\": \"android\",\n  \"deviceId\": \"device_android_99\"\n}"
+            },
+            "description": "Called by rider app on token refresh or app start to keep FCM push token and platform in sync."
           }
         },
         {

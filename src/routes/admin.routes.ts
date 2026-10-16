@@ -13,7 +13,9 @@ import {
   listPayoutRequests,
   updatePayoutRequest,
   getRiderWalletHistory,
-  fetchAnalytics
+  fetchAnalytics,
+  broadcastNotification,
+  sendUserNotification
 } from '../controllers/admin.controller';
 
 import { getCities, createCity, updateCity, toggleCityStatus, getCityById, deleteCity } from '../controllers/city.controller';
@@ -55,6 +57,10 @@ router.get('/users', getUsers);
 router.get('/passengers/:id', getPassengerById);
 router.put('/users/:id/ban', banUser);
 router.put('/users/:id/unban', unbanUser);
+
+// Push Notifications (Admin Broadcast & Targeted)
+router.post('/notifications/broadcast', broadcastNotification);
+router.post('/notifications/send-user', sendUserNotification);
 
 // SOS
 router.get('/sos', getSOSAlerts);

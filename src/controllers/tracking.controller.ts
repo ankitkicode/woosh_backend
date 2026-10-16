@@ -7,7 +7,7 @@ import { Ride } from '../models/Ride';
 import { SOSAlert } from '../models/SOSAlert';
 import { User } from '../models/User';
 import { whatsappService } from '../services/whatsapp.service';
-
+import { UserRole } from '../config/constants';
 
 /**
  * @route   PUT /api/v1/tracking/location
@@ -104,6 +104,25 @@ export const triggerSOS = asyncHandler(async (req: Request, res: Response) => {
       });
     }
   }).catch(err => console.error('[SOS] Socket error:', err));
+
+  // Notify Admins via FCM Push Notification
+  User.find({ role: { $in: [UserRole.ADMIN, UserRole.SUPER_ADMIN] } } as any).then((admins: any[]) => {
+    const adminIds = admins.map(a => a._id.toString());
+    if (adminIds.length > 0) {
+      import('../services/fcm.service').then(({ fcmService }) => {
+        fcmService.sendToUsers(
+          adminIds,
+          '🚨 EMERGENCY SOS ALERT!',
+          `SOS triggered by ${roleStr.toUpperCase()} on Ride #${ride._id}. Location: ${address || 'Live Coordinates'}`,
+          {
+            type: 'SOS_TRIGGERED',
+            rideId: ride._id.toString(),
+            role: roleStr,
+          }
+        ).catch(err => console.error('[FCM] Error sending SOS push to admins:', err));
+      });
+    }
+  }).catch(err => console.error('[SOS] Error finding admins for push:', err));
 
   res.status(200).json(new ApiResponse(200, 'SOS triggered. Help is on the way!', {
     sosAlertId: sosAlert._id,

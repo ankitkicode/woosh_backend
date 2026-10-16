@@ -984,3 +984,73 @@ export const fetchAnalytics = asyncHandler(async (req: Request, res: Response) =
     totalPayouts
   }));
 });
+
+/**
+ * @route   POST /api/v1/admin/notifications/broadcast
+ * @desc    Broadcast push notification to ALL, PASSENGERS, or RIDERS with optional city targeting
+ * @access  Protected (Admin / Super Admin)
+ */
+export const broadcastNotification = asyncHandler(async (req: Request, res: Response) => {
+  const { target = 'ALL', title, body, city, platform, data, imageUrl } = req.body;
+
+  if (!title || !body) {
+    throw new ApiError(400, 'Title and Body are required for notification');
+  }
+
+  const payloadData: Record<string, string> = {
+    ...(data || {}),
+    ...(imageUrl ? { imageUrl } : {}),
+    sentBy: 'ADMIN',
+    timestamp: new Date().toISOString(),
+  };
+
+  const result = await fcmService.broadcastNotification(
+    target,
+    title,
+    body,
+    city,
+    payloadData,
+    platform
+  );
+
+  res.status(200).json(new ApiResponse(200, `Broadcast notification sent to ${result.sentCount} active devices`, {
+    target,
+    platform: platform || 'ALL_PLATFORMS',
+    city: city || 'ALL_CITIES',
+    title,
+    sentDevicesCount: result.sentCount,
+  }));
+});
+
+/**
+ * @route   POST /api/v1/admin/notifications/send-user
+ * @desc    Send push notification to a specific user (Passenger or Rider)
+ * @access  Protected (Admin / Super Admin)
+ */
+export const sendUserNotification = asyncHandler(async (req: Request, res: Response) => {
+  const { userId, title, body, data, imageUrl } = req.body;
+
+  if (!userId || !title || !body) {
+    throw new ApiError(400, 'userId, title, and body are required');
+  }
+
+  const user = await User.findById(userId);
+  if (!user) {
+    throw new ApiError(404, 'User not found');
+  }
+
+  const payloadData: Record<string, string> = {
+    ...(data || {}),
+    ...(imageUrl ? { imageUrl } : {}),
+    sentBy: 'ADMIN',
+    timestamp: new Date().toISOString(),
+  };
+
+  const isSent = await fcmService.sendToUser(userId, title, body, payloadData);
+
+  res.status(200).json(new ApiResponse(200, isSent ? 'Notification sent successfully' : 'User has no active devices or FCM tokens', {
+    userId,
+    delivered: isSent,
+  }));
+});
+

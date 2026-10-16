@@ -16,6 +16,7 @@ import { DisputeCategory, PaymentMethod, PaymentStatus, RideStatus, UserRole, Wa
 import { WalletTransaction } from '../models/WalletTransaction';
 import { SystemConfig } from '../models/SystemConfig';
 import { paymentService } from '../services/payment.service';
+import { fcmService } from '../services/fcm.service';
 
 const generateRideOTP = (): string => String(crypto.randomInt(1000, 9999));
 
@@ -211,6 +212,21 @@ export const requestRide = asyncHandler(async (req: Request, res: Response) => {
     console.error('[Socket] Error emitting new_ride_request:', err);
   }
 
+  // Send Push Notification to assigned rider
+  if (initialAssignedRider) {
+    fcmService.sendToUser(
+      initialAssignedRider.toString(),
+      '🚕 New Ride Request!',
+      `Pickup: ${pickup.address || 'Nearby'} • Fare: ₹${fare.totalFare}`,
+      {
+        type: 'RIDE_REQUESTED',
+        rideId: ride._id.toString(),
+        fare: String(fare.totalFare),
+      }
+    ).catch(err => console.error('[FCM] Error notifying rider of new request:', err));
+  }
+
+
   res.status(201).json(new ApiResponse(201, 'Ride requested. Searching for riders...', {
     ...ride.toObject(),
     pickup: enrichedPickup
@@ -294,6 +310,18 @@ export const acceptRide = asyncHandler(async (req: Request, res: Response) => {
         });
       }
     });
+
+    // Send FCM Push Notification to passenger
+    fcmService.sendToUser(
+      passengerUser._id.toString(),
+      '👩‍🦰 Driver On The Way!',
+      'Your driver has accepted the ride and is heading to your pickup location.',
+      {
+        type: 'RIDE_ACCEPTED',
+        rideId: ride._id.toString(),
+        otp: ride.otp,
+      }
+    ).catch(err => console.error('[FCM] Error notifying passenger of acceptance:', err));
   } catch (err) {
     console.error('[Notification] Error notifying passenger of acceptance:', err);
   }
@@ -357,6 +385,18 @@ export const riderArrived = asyncHandler(async (req: Request, res: Response) => 
     }
   });
 
+  // Push notification: Driver arrived
+  fcmService.sendToUser(
+    ride.passenger.toString(),
+    '📍 Driver Has Arrived!',
+    `Your driver has reached the pickup location. Share OTP ${ride.otp} to start ride.`,
+    {
+      type: 'RIDER_ARRIVED',
+      rideId: ride._id.toString(),
+      otp: ride.otp,
+    }
+  ).catch(err => console.error('[FCM] Error in riderArrived:', err));
+
   res.status(200).json(new ApiResponse(200, 'Marked as arrived at pickup', ride));
 });
 
@@ -374,17 +414,6 @@ export const startRide = asyncHandler(async (req: Request, res: Response) => {
   ride.rideStartedAt = new Date();
   await ride.save();
 
-  // const passengerUser = ride.passenger as any;
-  // if (passengerUser && passengerUser.phoneNumber) {
-  //   // Send WhatsApp Ride Started
-  //   await whatsappService.sendRideStarted(passengerUser.phoneNumber);
-  //   // Send WhatsApp Live Tracking Link to Passenger
-  //   await whatsappService.sendRideTrackingLink(
-  //     passengerUser.phoneNumber, 
-  //     `https://woosh.com/track/${ride._id}`
-  //   );
-  // }
-
   // Socket notification
   import('../sockets/tracking.socket').then(({ getIo }) => {
     const ioInstance = getIo();
@@ -394,6 +423,17 @@ export const startRide = asyncHandler(async (req: Request, res: Response) => {
       });
     }
   });
+
+  // Push notification: Ride started
+  fcmService.sendToUser(
+    ride.passenger.toString(),
+    '🚀 Ride Started',
+    'Your trip has started. Have a safe and comfortable ride with Woosh!',
+    {
+      type: 'RIDE_STARTED',
+      rideId: ride._id.toString(),
+    }
+  ).catch(err => console.error('[FCM] Error in startRide:', err));
 
   res.status(200).json(new ApiResponse(200, 'Ride started', ride));
 });
@@ -488,6 +528,19 @@ export const completeRide = asyncHandler(async (req: Request, res: Response) => 
       });
     }
   });
+
+  // Push notification: Ride completed
+  fcmService.sendToUser(
+    ride.passenger.toString(),
+    '✅ Ride Completed',
+    `Your trip has ended. Total Fare: ₹${ride.finalFare}. Tap to view payment & receipt.`,
+    {
+      type: 'RIDE_COMPLETED',
+      rideId: ride._id.toString(),
+      fare: String(ride.finalFare),
+      remainingDue: String(ride.remainingAmountToPay ?? ride.finalFare),
+    }
+  ).catch(err => console.error('[FCM] Error in completeRide:', err));
 
   const payableRemaining = ride.remainingAmountToPay !== undefined ? ride.remainingAmountToPay : ride.finalFare;
 
@@ -673,6 +726,20 @@ export const verifyDigitalPayment = asyncHandler(async (req: Request, res: Respo
     }
   });
 
+  // Push notification: Rider earnings credited
+  if (ride.rider) {
+    fcmService.sendToUser(
+      ride.rider.toString(),
+      '💰 Payment Received!',
+      `₹${riderEarnings} has been credited to your wallet for Ride #${ride._id}${tipAmount > 0 ? ` (includes ₹${tipAmount} tip)` : ''}.`,
+      {
+        type: 'PAYMENT_RECEIVED',
+        rideId: ride._id.toString(),
+        amount: String(riderEarnings),
+      }
+    ).catch(err => console.error('[FCM] Error in verifyDigitalPayment:', err));
+  }
+
   res.status(200).json(new ApiResponse(200, 'Payment verified successfully', ride));
 });
 
@@ -729,6 +796,21 @@ export const cancelRide = asyncHandler(async (req: Request, res: Response) => {
       }
     }
   });
+
+  // Push notification: Ride cancelled
+  const recipientId = cancelledBy === CancellationBy.PASSENGER ? ride.rider : ride.passenger;
+  if (recipientId) {
+    fcmService.sendToUser(
+      recipientId.toString(),
+      '❌ Ride Cancelled',
+      `Ride #${ride._id} was cancelled by ${cancelledBy.toLowerCase()}.${reason ? ` Reason: ${reason}` : ''}`,
+      {
+        type: 'RIDE_CANCELLED',
+        rideId: ride._id.toString(),
+        cancelledBy,
+      }
+    ).catch(err => console.error('[FCM] Error in cancelRide notification:', err));
+  }
 
   res.status(200).json(new ApiResponse(200, 'Ride cancelled', ride));
 });

@@ -123,7 +123,8 @@ export const sendOTP = asyncHandler(async (req: Request, res: Response) => {
 
 
 export const verifyOTP = asyncHandler(async (req: Request, res: Response) => {
-  const { phoneNumber, otp, role, deviceId, fcmToken, os, deviceModel } = req.body;
+  const { phoneNumber, otp, role, deviceId, fcmToken, os, platform, deviceModel } = req.body;
+  const clientPlatform = platform || os;
 
   const otpRecord = await OTP.findOne({ phoneNumber });
   if (!otpRecord) throw new ApiError(400, 'OTP not found. Please request a new one.');
@@ -219,7 +220,8 @@ export const verifyOTP = asyncHandler(async (req: Request, res: Response) => {
       // Update existing session
       user.sessions[existingSessionIndex].refreshToken = refreshToken;
       user.sessions[existingSessionIndex].fcmToken = fcmToken || user.sessions[existingSessionIndex].fcmToken;
-      user.sessions[existingSessionIndex].os = os || user.sessions[existingSessionIndex].os;
+      user.sessions[existingSessionIndex].os = clientPlatform || user.sessions[existingSessionIndex].os;
+      user.sessions[existingSessionIndex].platform = clientPlatform || user.sessions[existingSessionIndex].platform;
       user.sessions[existingSessionIndex].deviceModel = deviceModel || user.sessions[existingSessionIndex].deviceModel;
       user.sessions[existingSessionIndex].lastActive = new Date();
     } else {
@@ -227,7 +229,8 @@ export const verifyOTP = asyncHandler(async (req: Request, res: Response) => {
       user.sessions.push({
         deviceId,
         fcmToken,
-        os,
+        os: clientPlatform,
+        platform: clientPlatform,
         deviceModel,
         refreshToken,
         lastActive: new Date()
@@ -238,6 +241,10 @@ export const verifyOTP = asyncHandler(async (req: Request, res: Response) => {
     user.sessions = [{
       deviceId: 'generic-device',
       refreshToken,
+      fcmToken,
+      os: clientPlatform,
+      platform: clientPlatform,
+      deviceModel,
       lastActive: new Date()
     }];
   }
@@ -549,6 +556,68 @@ export const forgotMpin = asyncHandler(async (req: Request, res: Response) => {
     },
     accessToken,
     refreshToken,
+  }));
+});
+
+/**
+ * @route   PUT /api/v1/auth/fcm-token
+ * @desc    Update or refresh device FCM Token and platform
+ * @access  Protected
+ */
+export const updateFcmToken = asyncHandler(async (req: Request, res: Response) => {
+  const { fcmToken, platform, os, deviceId, deviceModel } = req.body;
+  const clientPlatform = platform || os;
+  const user = await User.findById(req.user?._id);
+
+  if (!user) {
+    throw new ApiError(404, 'User not found');
+  }
+
+  if (deviceId) {
+    const existingIndex = user.sessions.findIndex(s => s.deviceId === deviceId);
+    if (existingIndex > -1) {
+      user.sessions[existingIndex].fcmToken = fcmToken;
+      if (clientPlatform) {
+        user.sessions[existingIndex].os = clientPlatform;
+        user.sessions[existingIndex].platform = clientPlatform;
+      }
+      if (deviceModel) user.sessions[existingIndex].deviceModel = deviceModel;
+      user.sessions[existingIndex].lastActive = new Date();
+    } else {
+      user.sessions.push({
+        deviceId,
+        fcmToken,
+        os: clientPlatform,
+        platform: clientPlatform,
+        deviceModel,
+        refreshToken: 'fcm-session-token',
+        lastActive: new Date(),
+      });
+    }
+  } else if (user.sessions.length > 0) {
+    // Update the most recent active session
+    user.sessions[user.sessions.length - 1].fcmToken = fcmToken;
+    if (clientPlatform) {
+      user.sessions[user.sessions.length - 1].os = clientPlatform;
+      user.sessions[user.sessions.length - 1].platform = clientPlatform;
+    }
+    user.sessions[user.sessions.length - 1].lastActive = new Date();
+  } else {
+    user.sessions.push({
+      deviceId: 'primary-device',
+      fcmToken,
+      os: clientPlatform,
+      platform: clientPlatform,
+      refreshToken: 'fcm-session-token',
+      lastActive: new Date(),
+    });
+  }
+
+  await user.save();
+
+  res.status(200).json(new ApiResponse(200, 'FCM token and platform updated successfully', {
+    fcmToken,
+    platform: clientPlatform,
   }));
 });
 

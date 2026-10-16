@@ -12,6 +12,8 @@ import path from 'path';
 import swaggerUi from 'swagger-ui-express';
 import fs from 'fs';
 
+dotenv.config();
+
 import { connectDB } from './config/db';
 import { ApiError } from './utils/ApiError';
 import { ApiResponse } from './utils/ApiResponse';
@@ -19,8 +21,6 @@ import { registerTrackingSocket } from './sockets/tracking.socket';
 import { startRideAssignmentCron } from './cron/rideAssignment.cron';
 import { startStaleRidesCron } from './cron/staleRides.cron';
 import routes from './routes/index';
-
-dotenv.config();
 
 // Connect to MongoDB
 connectDB();

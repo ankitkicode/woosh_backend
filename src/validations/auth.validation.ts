@@ -19,6 +19,15 @@ export const verifyOTPSchema = z.object({
   deviceId: z.string().min(1, 'Device ID is required for session management').optional(),
   fcmToken: z.string().optional(),
   os: z.string().optional(),
+  platform: z.enum(['ios', 'android', 'web']).optional(),
+  deviceModel: z.string().optional(),
+});
+
+export const updateFcmTokenSchema = z.object({
+  fcmToken: z.string().optional(),
+  platform: z.enum(['ios', 'android', 'web']).optional(),
+  os: z.string().optional(),
+  deviceId: z.string().optional(),
   deviceModel: z.string().optional(),
 });
 

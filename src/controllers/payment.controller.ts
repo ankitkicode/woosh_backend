@@ -13,6 +13,7 @@ import mongoose from 'mongoose';
 import { PayoutRequest, PayoutStatus } from '../models/PayoutRequest';
 import { paymentService } from '../services/payment.service';
 import { StatementPdfService } from '../services/statementPdf.service';
+import { fcmService } from '../services/fcm.service';
 
 /**
  * Calculates monthly statement financial breakdown using real MongoDB records
@@ -657,5 +658,20 @@ export const verifyRidePayment = asyncHandler(async (req: Request, res: Response
     }
   }).catch(err => console.error('[Socket] Error in verifyRidePayment:', err));
 
+  // Push notification to Rider
+  if (ride.rider) {
+    fcmService.sendToUser(
+      ride.rider.toString(),
+      '💰 Payment Received!',
+      `₹${riderShare} credited to your wallet for Ride #${ride._id}${tipAmount > 0 ? ` (incl. ₹${tipAmount} tip)` : ''}.`,
+      {
+        type: 'PAYMENT_RECEIVED',
+        rideId: ride._id.toString(),
+        amount: String(riderShare),
+      }
+    ).catch(err => console.error('[FCM] Error in verifyRidePayment notification:', err));
+  }
+
   res.status(200).json(new ApiResponse(200, 'Ride payment verified successfully', { ride }));
 });
+

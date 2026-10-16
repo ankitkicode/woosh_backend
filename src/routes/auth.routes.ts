@@ -1,14 +1,15 @@
 import { Router } from 'express';
 import { 
   sendOTP, verifyOTP, refreshToken, logout, logoutAllDevices, getActiveSessions, verifyGender,
-  setMpin, verifyMpin, changeMpin, forgotMpin
+  setMpin, verifyMpin, changeMpin, forgotMpin, updateFcmToken
 } from '../controllers/auth.controller';
 import { validate } from '../middlewares/validate.middleware';
 import { protect } from '../middlewares/auth.middleware';
 import { upload } from '../middlewares/upload.middleware';
 import { 
   sendOTPSchema, verifyOTPSchema, refreshTokenSchema, logoutSchema,
-  setMpinSchema, verifyMpinSchema, changeMpinSchema, forgotMpinSchema
+  setMpinSchema, verifyMpinSchema, changeMpinSchema, forgotMpinSchema,
+  updateFcmTokenSchema
 } from '../validations/auth.validation';
 
 const router = Router();
@@ -63,6 +64,7 @@ logout);
 
 router.post('/logout-all', protect, logoutAllDevices);
 router.get('/sessions', protect, getActiveSessions);
+router.put('/fcm-token', protect, validate(updateFcmTokenSchema), updateFcmToken);
 
 export default router;
 
