@@ -55,12 +55,7 @@ router.post(
   refreshToken
 );
 
-router.post('/logout', protect, validate(logoutSchema), 
-  /*  #swagger.parameters['body'] = {
-        in: 'body',
-        schema: { deviceId: "A1B2C3D4" }
-  } */
-logout);
+router.post('/logout', protect, validate(logoutSchema), logout);
 
 router.post('/logout-all', protect, logoutAllDevices);
 router.get('/sessions', protect, getActiveSessions);

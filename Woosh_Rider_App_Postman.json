@@ -7,7 +7,7 @@
   "variable": [
     {
       "key": "baseUrl",
-      "value": "http://localhost:5000/api/v1",
+      "value": "http://localhost:5001/api/v1",
       "type": "string"
     },
     {
@@ -230,6 +230,68 @@
               "raw": "{\n  \"phoneNumber\": \"9876543210\",\n  \"otp\": \"1234\",\n  \"newMpin\": \"9999\",\n  \"confirmNewMpin\": \"9999\"\n}"
             },
             "description": "Resets forgotten MPIN using mobile OTP verification."
+          }
+        },
+        {
+          "name": "Logout (Current Device)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "logout"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deviceId\": \"device_android_99\"\n}"
+            },
+            "description": "Logs out rider from current device. Invalidates session and clears FCM push tokens for this device."
+          }
+        },
+        {
+          "name": "Logout All Devices",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout-all",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "logout-all"]
+            },
+            "description": "Logs out rider from all logged-in devices and clears all sessions."
+          }
+        },
+        {
+          "name": "Get Active Sessions (Linked Devices)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/sessions",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "sessions"]
+            },
+            "description": "Get all active logged-in devices and sessions for current rider."
           }
         }
       ]
@@ -1183,6 +1245,129 @@
               "mode": "raw",
               "raw": "{\n  \"name\": \"Ankit Kumar\",\n  \"phone\": \"9876543210\",\n  \"email\": \"rider@woosh.com\",\n  \"subject\": \"Commission query\",\n  \"message\": \"Need assistance regarding commission calculation on my monthly statement.\"\n}"
             }
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. Notification Center & History",
+      "item": [
+        {
+          "name": "Get Notifications History (Paginated)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notifications?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["notifications"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Fetch all notifications history for rider (assigned rides, earnings, KYC updates, announcements)."
+          }
+        },
+        {
+          "name": "Get Unread Notifications Count (Bell Badge)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/unread-count",
+              "host": ["{{baseUrl}}"],
+              "path": ["notifications", "unread-count"]
+            },
+            "description": "Quick call to show red counter badge on top bell icon in Rider App."
+          }
+        },
+        {
+          "name": "Mark Single Notification as Read",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/NOTIFICATION_ID_HERE/read",
+              "host": ["{{baseUrl}}"],
+              "path": ["notifications", "NOTIFICATION_ID_HERE", "read"]
+            },
+            "description": "Mark clicked notification as read."
+          }
+        },
+        {
+          "name": "Mark All Notifications as Read",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/read-all",
+              "host": ["{{baseUrl}}"],
+              "path": ["notifications", "read-all"]
+            },
+            "description": "Clear all unread notification badges."
+          }
+        },
+        {
+          "name": "Delete Notification",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/NOTIFICATION_ID_HERE",
+              "host": ["{{baseUrl}}"],
+              "path": ["notifications", "NOTIFICATION_ID_HERE"]
+            },
+            "description": "Remove single notification item."
+          }
+        },
+        {
+          "name": "Clear All Notifications",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/clear-all",
+              "host": ["{{baseUrl}}"],
+              "path": ["notifications", "clear-all"]
+            },
+            "description": "Wipe entire notification inbox for rider."
           }
         }
       ]

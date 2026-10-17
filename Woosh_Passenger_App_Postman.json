@@ -7,7 +7,7 @@
   "variable": [
     {
       "key": "baseUrl",
-      "value": "http://localhost:5000/api/v1",
+      "value": "http://localhost:5001/api/v1",
       "type": "string"
     },
     {
@@ -185,7 +185,7 @@
           }
         },
         {
-          "name": "Logout",
+          "name": "Logout (Current Device)",
           "request": {
             "method": "POST",
             "header": [
@@ -206,7 +206,44 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"deviceId\": \"device_android_passenger_101\"\n}"
-            }
+            },
+            "description": "Logs out passenger from current device and clears session/FCM tokens for this deviceId."
+          }
+        },
+        {
+          "name": "Logout All Devices",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout-all",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "logout-all"]
+            },
+            "description": "Logs out passenger from all linked devices and clears all sessions."
+          }
+        },
+        {
+          "name": "Get Active Sessions (Linked Devices)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/sessions",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "sessions"]
+            },
+            "description": "Get all active logged-in devices and sessions for current passenger."
           }
         },
         {
@@ -1339,6 +1376,129 @@
               "mode": "raw",
               "raw": "{\n  \"category\": \"fare\",\n  \"subject\": \"Overcharged fare dispute\",\n  \"description\": \"I was overcharged by ₹40 due to bad GPS calculation.\",\n  \"rideId\": \"{{rideId}}\"\n}"
             }
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. Notification Center & History",
+      "item": [
+        {
+          "name": "Get Notifications History (Paginated)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notifications?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["notifications"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Fetch all notifications history for passenger (includes unreadCount, title, body, type, isRead, timestamps)."
+          }
+        },
+        {
+          "name": "Get Unread Notifications Count (Bell Badge)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/unread-count",
+              "host": ["{{baseUrl}}"],
+              "path": ["notifications", "unread-count"]
+            },
+            "description": "Quick call to show red counter badge on top bell icon in Passenger App."
+          }
+        },
+        {
+          "name": "Mark Single Notification as Read",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/NOTIFICATION_ID_HERE/read",
+              "host": ["{{baseUrl}}"],
+              "path": ["notifications", "NOTIFICATION_ID_HERE", "read"]
+            },
+            "description": "Mark clicked notification as read."
+          }
+        },
+        {
+          "name": "Mark All Notifications as Read",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/read-all",
+              "host": ["{{baseUrl}}"],
+              "path": ["notifications", "read-all"]
+            },
+            "description": "Clear all unread notification badges."
+          }
+        },
+        {
+          "name": "Delete Notification",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/NOTIFICATION_ID_HERE",
+              "host": ["{{baseUrl}}"],
+              "path": ["notifications", "NOTIFICATION_ID_HERE"]
+            },
+            "description": "Remove single notification item."
+          }
+        },
+        {
+          "name": "Clear All Notifications",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/clear-all",
+              "host": ["{{baseUrl}}"],
+              "path": ["notifications", "clear-all"]
+            },
+            "description": "Wipe entire notification inbox for passenger."
           }
         }
       ]

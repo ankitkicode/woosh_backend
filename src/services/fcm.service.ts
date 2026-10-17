@@ -1,6 +1,7 @@
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 import { User } from '../models/User';
+import { Notification } from '../models/Notification';
 import path from 'path';
 import fs from 'fs';
 
@@ -114,10 +115,25 @@ export const fcmService = {
   },
 
   /**
-   * Send Push Notification to all active devices of a single User
+   * Send Push Notification to all active devices of a single User & save to DB history
    */
   async sendToUser(userId: string, title: string, body: string, data?: Record<string, string>): Promise<boolean> {
     try {
+      // 1. Save Notification record to DB history
+      try {
+        await Notification.create({
+          user: userId,
+          title,
+          body,
+          type: data?.type || 'GENERAL',
+          data: data || {},
+          isRead: false,
+        });
+      } catch (dbErr) {
+        console.error('[FCM] Error saving notification to history:', dbErr);
+      }
+
+      // 2. Deliver live FCM push
       const user = await User.findById(userId);
       if (!user || !user.sessions || user.sessions.length === 0) return false;
 
@@ -135,10 +151,28 @@ export const fcmService = {
   },
 
   /**
-   * Send Push Notification to multiple Users by IDs
+   * Send Push Notification to multiple Users by IDs & save to DB history
    */
   async sendToUsers(userIds: string[], title: string, body: string, data?: Record<string, string>): Promise<boolean> {
     try {
+      if (userIds.length === 0) return false;
+
+      // 1. Save to DB history in bulk
+      try {
+        const notifDocs = userIds.map(uid => ({
+          user: uid,
+          title,
+          body,
+          type: data?.type || 'GENERAL',
+          data: data || {},
+          isRead: false,
+        }));
+        await Notification.insertMany(notifDocs);
+      } catch (dbErr) {
+        console.error('[FCM] Error bulk saving notifications to history:', dbErr);
+      }
+
+      // 2. Deliver live FCM push
       const users = await User.find({ _id: { $in: userIds } });
       const tokens: string[] = [];
 
@@ -182,10 +216,12 @@ export const fcmService = {
         query.city = new RegExp(`^${city}$`, 'i');
       }
 
-      const users = await User.find(query).select('sessions');
+      const users = await User.find(query).select('_id sessions');
       const tokenSet = new Set<string>();
+      const matchedUserIds: string[] = [];
 
       users.forEach(user => {
+        matchedUserIds.push(user._id.toString());
         user.sessions?.forEach(session => {
           if (session.fcmToken) {
             if (platform) {
@@ -199,6 +235,23 @@ export const fcmService = {
           }
         });
       });
+
+      // Save notification in history for all targeted users
+      if (matchedUserIds.length > 0) {
+        try {
+          const bulkNotifs = matchedUserIds.map(uid => ({
+            user: uid,
+            title,
+            body,
+            type: data?.type || 'ANNOUNCEMENT',
+            data: data || {},
+            isRead: false,
+          }));
+          await Notification.insertMany(bulkNotifs, { ordered: false });
+        } catch (dbErr) {
+          console.error('[FCM] Error saving broadcast to history:', dbErr);
+        }
+      }
 
       const tokens = Array.from(tokenSet);
       if (tokens.length === 0) {
