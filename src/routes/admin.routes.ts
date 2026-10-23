@@ -5,8 +5,8 @@ import { UserRole } from '../config/constants';
 import {
   getDashboard, getPendingRiders, approveRider, rejectRider, updateDocumentStatus,
   getAllRiders, getRiderById, deleteRider,
-  getActiveRides, getAllRides, getRideById,
-  getDisputes, resolveDispute,
+  getActiveRides, getAllRides, getRideById, cancelRideByAdmin,
+  getDisputes, resolveDispute, getDisputeById,
   getUsers, getSOSAlerts, getInsuranceClaims,
   banUser, unbanUser, resolveSOSAlert, markSOSFalseAlarm,
   updateInsuranceClaimStatus, getPassengerById, deletePassenger, adminLogin,
@@ -52,6 +52,7 @@ router.get('/dashboard', getDashboard);
 router.get('/rides', getAllRides);
 router.get('/rides/active', getActiveRides);
 router.get('/rides/:id', getRideById);
+router.put('/rides/:id/cancel', cancelRideByAdmin);
 
 // Riders
 router.get('/riders', getAllRiders);
@@ -65,6 +66,7 @@ router.put('/riders/:id/documents/:docType/status', updateDocumentStatus);
 
 // Disputes
 router.get('/disputes', getDisputes);
+router.get('/disputes/:id', getDisputeById);
 router.put('/disputes/:id/resolve', resolveDispute);
 
 // Users & Passengers

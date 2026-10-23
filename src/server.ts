@@ -27,7 +27,7 @@ connectDB();
 
 // Start Background Jobs
 startRideAssignmentCron();
-startStaleRidesCron();
+// startStaleRidesCron();
 
 const app = express();
 const server = http.createServer(app);

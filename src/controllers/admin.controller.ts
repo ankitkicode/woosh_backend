@@ -12,7 +12,7 @@ import { RiderProfile } from '../models/RiderProfile';
 import { WalletTransaction } from '../models/WalletTransaction';
 import { SOSAlert } from '../models/SOSAlert';
 import { InsuranceClaim } from '../models/InsuranceClaim';
-import { KYCStatus, RideStatus, ComplaintStatus, PaymentStatus, WalletTransactionType, UserRole } from '../config/constants';
+import { KYCStatus, RideStatus, ComplaintStatus, PaymentStatus, WalletTransactionType, UserRole, CancellationBy } from '../config/constants';
 import { ChildProfile } from '../models/ChildProfile';
 import { Admin } from '../models/Admin';
 import { generateAccessToken, generateRefreshToken } from '../utils/generateToken';
@@ -86,25 +86,72 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
     User.countDocuments({ role: { $in: ['passenger', 'both'] } } as Record<string, unknown>),
     User.countDocuments({ role: { $in: ['rider', 'both'] } } as Record<string, unknown>),
     Ride.countDocuments(),
-    Ride.countDocuments({ status: { $in: [RideStatus.ACCEPTED, RideStatus.STARTED] } }),
+    Ride.countDocuments({
+      status: {
+        $in: [
+          RideStatus.ACCEPTED,
+          RideStatus.RIDER_EN_ROUTE,
+          RideStatus.RIDER_ARRIVED,
+          RideStatus.OTP_VERIFICATION,
+          RideStatus.STARTED,
+          RideStatus.IN_PROGRESS
+        ]
+      }
+    }),
     RiderProfile.countDocuments({ kycStatus: KYCStatus.UNDER_REVIEW }),
     Dispute.countDocuments({ status: ComplaintStatus.OPEN }),
-    Ride.countDocuments({ status: RideStatus.COMPLETED }),
-    Ride.countDocuments({ status: { $in: [RideStatus.RIDER_CANCELLED, RideStatus.PASSENGER_CANCELLED] } }),
+    Ride.countDocuments({
+      status: { $in: [RideStatus.COMPLETED, RideStatus.PAYMENT_COMPLETED, RideStatus.CLOSED] }
+    }),
+    Ride.countDocuments({
+      status: {
+        $in: [
+          RideStatus.RIDER_CANCELLED,
+          RideStatus.PASSENGER_CANCELLED,
+          RideStatus.NO_SHOW,
+          RideStatus.TIMED_OUT,
+          RideStatus.FAILED_OTP
+        ]
+      }
+    }),
     SOSAlert.countDocuments({ status: 'active' }),
     RiderProfile.countDocuments({ isOnline: true }),
     SupportTicket.countDocuments({ status: { $in: ['OPEN', 'IN_PROGRESS'] } }),
     getChartData(),
     getTrendsData(),
     Ride.aggregate([
-      { $match: { status: { $in: [RideStatus.COMPLETED, RideStatus.PAYMENT_COMPLETED] }, finalFare: { $exists: true, $ne: null } } },
-      { $group: { _id: null, totalRevenue: { $sum: '$finalFare' } } },
+      {
+        $match: {
+          status: { $in: [RideStatus.COMPLETED, RideStatus.PAYMENT_COMPLETED, RideStatus.CLOSED] },
+          $or: [
+            { finalFare: { $exists: true, $gt: 0 } },
+            { estimatedFare: { $exists: true, $gt: 0 } }
+          ]
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalRevenue: { $sum: { $ifNull: ['$finalFare', '$estimatedFare'] } }
+        }
+      },
     ]),
     RiderProfile.find({ isOnline: true })
       .populate('user', 'name phoneNumber')
       .select('user vehicleNumber vehicleModel vehicleType currentLocation isOnline totalRides')
       .limit(10),
-    Ride.find({ status: { $in: [RideStatus.ACCEPTED, RideStatus.STARTED] } })
+    Ride.find({
+      status: {
+        $in: [
+          RideStatus.ACCEPTED,
+          RideStatus.RIDER_EN_ROUTE,
+          RideStatus.RIDER_ARRIVED,
+          RideStatus.OTP_VERIFICATION,
+          RideStatus.STARTED,
+          RideStatus.IN_PROGRESS
+        ]
+      }
+    })
       .populate('passenger', 'name phoneNumber')
       .populate('rider', 'name phoneNumber')
       .select('passenger rider pickup drop status estimatedFare finalFare createdAt')
@@ -351,26 +398,99 @@ export const deleteRider = asyncHandler(async (req: Request, res: Response) => {
  * @access  Protected (admin)
  */
 export const listPayoutRequests = asyncHandler(async (req: Request, res: Response) => {
-  const { status } = req.query;
+  const { status, search } = req.query;
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 15;
   const skip = (page - 1) * limit;
 
-  const filter: Record<string, unknown> = {};
-  if (status && status !== 'all') filter.status = status as string;
+  const filter: any = {};
+  if (status && status !== 'all') filter.status = status;
 
-  const [payouts, total] = await Promise.all([
+  if (search) {
+    const { BankAccount } = await import('../models/BankAccount');
+    const [matchingUsers, matchingBanks] = await Promise.all([
+      User.find({
+        $or: [
+          { name: { $regex: search as string, $options: 'i' } },
+          { phoneNumber: { $regex: search as string, $options: 'i' } },
+        ]
+      }).select('_id'),
+      BankAccount.find({
+        $or: [
+          { bankName: { $regex: search as string, $options: 'i' } },
+          { accountNumber: { $regex: search as string, $options: 'i' } },
+          { ifscCode: { $regex: search as string, $options: 'i' } },
+          { accountHolderName: { $regex: search as string, $options: 'i' } },
+        ]
+      }).select('_id')
+    ]);
+
+    const userIds = matchingUsers.map(u => u._id);
+    const bankIds = matchingBanks.map(b => b._id);
+
+    filter.$or = [
+      { transactionRef: { $regex: search as string, $options: 'i' } },
+      { rider: { $in: userIds } },
+      { bankAccount: { $in: bankIds } },
+    ];
+  }
+
+  const [payouts, total, statusAgg] = await Promise.all([
     PayoutRequest.find(filter)
-      .populate('rider', 'name phoneNumber')
+      .populate('rider', 'name phoneNumber email')
       .populate('bankAccount')
+      .populate('processedBy', 'name email role')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit),
     PayoutRequest.countDocuments(filter),
+    PayoutRequest.aggregate([
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 },
+          totalAmount: { $sum: '$amount' }
+        }
+      }
+    ])
   ]);
 
+  const counts: Record<string, { count: number; amount: number }> = {
+    pending: { count: 0, amount: 0 },
+    approved: { count: 0, amount: 0 },
+    completed: { count: 0, amount: 0 },
+    rejected: { count: 0, amount: 0 },
+  };
+
+  let allTotalAmount = 0;
+  let allTotalCount = 0;
+
+  statusAgg.forEach((agg: any) => {
+    if (counts[agg._id]) {
+      counts[agg._id] = { count: agg.count, amount: agg.totalAmount };
+    }
+    allTotalCount += agg.count;
+    allTotalAmount += agg.totalAmount;
+  });
+
   res.status(200).json(new ApiResponse(200, 'Payout requests fetched', {
-    payouts, page, limit, total, totalPages: Math.ceil(total / limit),
+    payouts,
+    page,
+    limit,
+    total,
+    totalPages: Math.ceil(total / limit),
+    counts: {
+      total: allTotalCount,
+      totalAmount: allTotalAmount,
+      pending: counts.pending.count,
+      pendingAmount: counts.pending.amount,
+      completed: counts.completed.count,
+      completedAmount: counts.completed.amount,
+      rejected: counts.rejected.count,
+      rejectedAmount: counts.rejected.amount,
+      approved: counts.approved.count,
+      approvedAmount: counts.approved.amount,
+    }
   }));
 });
 
@@ -406,7 +526,7 @@ export const bulkUpdatePayouts = asyncHandler(async (req: Request, res: Response
           user: payout.rider,
           type: WalletTransactionType.TOPUP,
           amount: payout.amount,
-          description: `Refund for rejected payout request`,
+          description: `Refund for rejected payout request: ${remarks || 'Rejected by operator'}`,
           referenceId: payout._id.toString(),
           balanceAfter: riderProfile.walletBalance
         });
@@ -420,6 +540,20 @@ export const bulkUpdatePayouts = asyncHandler(async (req: Request, res: Response
     payout.transactionRef = transactionRef;
 
     await payout.save();
+
+    // Send push notification to rider
+    try {
+      await fcmService.sendToUser(
+        payout.rider.toString(),
+        status === 'completed' ? 'Payout Dispatched! 💰' : 'Payout Update',
+        status === 'completed'
+          ? `₹${payout.amount} has been successfully settled to your bank account.`
+          : `Payout request of ₹${payout.amount} was rejected. Amount has been refunded to your wallet.`,
+        { type: 'PAYOUT_UPDATE', payoutId: payout._id.toString() }
+      );
+    } catch (fcmErr) {
+      console.error('Failed to dispatch payout FCM:', fcmErr);
+    }
   }
 
   res.status(200).json(new ApiResponse(200, `Successfully processed ${processedCount} payouts`, { processedCount }));
@@ -538,37 +672,133 @@ export const getActiveRides = asyncHandler(async (req: Request, res: Response) =
  * @access  Protected (admin)
  */
 export const getDisputes = asyncHandler(async (req: Request, res: Response) => {
-  const { status } = req.query;
+  const { status, category, search } = req.query;
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 15;
   const skip = (page - 1) * limit;
 
-  const filter: Record<string, unknown> = {};
-  if (status) filter.status = status as string;
-  const [disputes, total] = await Promise.all([
-    Dispute.find(filter).populate('raisedBy', 'name phoneNumber').sort({ createdAt: -1 }).skip(skip).limit(limit),
+  const filter: any = {};
+  if (status && status !== 'all') filter.status = status;
+  if (category && category !== 'all') filter.category = category;
+
+  if (search) {
+    const matchingUsers = await User.find({
+      $or: [
+        { name: { $regex: search as string, $options: 'i' } },
+        { phoneNumber: { $regex: search as string, $options: 'i' } },
+      ]
+    }).select('_id');
+    const userIds = matchingUsers.map(u => u._id);
+
+    filter.$or = [
+      { caseId: { $regex: search as string, $options: 'i' } },
+      { subject: { $regex: search as string, $options: 'i' } },
+      { description: { $regex: search as string, $options: 'i' } },
+      { raisedBy: { $in: userIds } },
+      { againstUser: { $in: userIds } },
+    ];
+  }
+
+  const [disputes, total, openCount, inProgressCount, resolvedCount, closedCount] = await Promise.all([
+    Dispute.find(filter)
+      .populate('raisedBy', 'name phoneNumber email role')
+      .populate('againstUser', 'name phoneNumber email role')
+      .populate({
+        path: 'ride',
+        select: '_id status pickup drop finalFare estimatedFare paymentMethod paymentStatus rider vehicleNumber vehicleModel vehicleType createdAt',
+        populate: { path: 'rider', select: 'name phoneNumber' }
+      })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit),
     Dispute.countDocuments(filter),
+    Dispute.countDocuments({ status: ComplaintStatus.OPEN }),
+    Dispute.countDocuments({ status: ComplaintStatus.IN_PROGRESS }),
+    Dispute.countDocuments({ status: ComplaintStatus.RESOLVED }),
+    Dispute.countDocuments({ status: ComplaintStatus.CLOSED }),
   ]);
 
   res.status(200).json(new ApiResponse(200, 'Disputes fetched', {
-    disputes, page, limit, total, totalPages: Math.ceil(total / limit),
+    disputes,
+    page,
+    limit,
+    total,
+    totalPages: Math.ceil(total / limit),
+    counts: {
+      total: openCount + inProgressCount + resolvedCount + closedCount,
+      open: openCount,
+      inProgress: inProgressCount,
+      resolved: resolvedCount,
+      closed: closedCount,
+    }
   }));
 });
 
 /**
+ * @route   GET /api/v1/admin/disputes/:id
+ * @desc    Get dispute details by ID
+ * @access  Protected (admin)
+ */
+export const getDisputeById = asyncHandler(async (req: Request, res: Response) => {
+  const dispute = await Dispute.findById(req.params.id)
+    .populate('raisedBy', 'name phoneNumber email role')
+    .populate('againstUser', 'name phoneNumber email role')
+    .populate({
+      path: 'ride',
+      select: '_id status pickup drop finalFare estimatedFare paymentMethod paymentStatus rider vehicleNumber vehicleModel vehicleType createdAt',
+      populate: { path: 'rider', select: 'name phoneNumber' }
+    });
+
+  if (!dispute) throw new ApiError(404, 'Dispute not found');
+  res.status(200).json(new ApiResponse(200, 'Dispute details fetched', dispute));
+});
+
+/**
  * @route   PUT /api/v1/admin/disputes/:id/resolve
- * @desc    Resolve a dispute
+ * @desc    Resolve or update dispute status with admin notes
  * @access  Protected (admin)
  */
 export const resolveDispute = asyncHandler(async (req: Request, res: Response) => {
-  const { adminNotes } = req.body;
+  const { adminNotes, status } = req.body;
+  const newStatus = status || ComplaintStatus.RESOLVED;
+
   const dispute = await Dispute.findByIdAndUpdate(
     req.params.id,
-    { status: ComplaintStatus.RESOLVED, adminNotes, resolvedAt: new Date() },
+    {
+      status: newStatus,
+      adminNotes,
+      resolvedAt: newStatus === ComplaintStatus.RESOLVED || newStatus === ComplaintStatus.CLOSED ? new Date() : undefined,
+    },
     { new: true }
-  );
+  )
+    .populate('raisedBy', 'name phoneNumber email role')
+    .populate('againstUser', 'name phoneNumber email role')
+    .populate({
+      path: 'ride',
+      select: '_id status pickup drop finalFare estimatedFare paymentMethod paymentStatus rider vehicleNumber vehicleModel vehicleType createdAt',
+      populate: { path: 'rider', select: 'name phoneNumber' }
+    });
+
   if (!dispute) throw new ApiError(404, 'Dispute not found');
-  res.status(200).json(new ApiResponse(200, 'Dispute resolved', dispute));
+
+  // Push notification to complainant
+  try {
+    if (dispute.raisedBy) {
+      const userId = typeof dispute.raisedBy === 'object' && (dispute.raisedBy as any)._id
+        ? (dispute.raisedBy as any)._id.toString()
+        : dispute.raisedBy.toString();
+      await fcmService.sendToUser(
+        userId,
+        `Dispute Update (#${dispute.caseId})`,
+        adminNotes ? adminNotes.slice(0, 100) : `Your dispute case has been updated to ${newStatus}`,
+        { type: 'DISPUTE_UPDATE', disputeId: dispute._id.toString() }
+      );
+    }
+  } catch (e) {
+    console.error('Failed to dispatch dispute push notification:', e);
+  }
+
+  res.status(200).json(new ApiResponse(200, 'Dispute updated successfully', dispute));
 });
 
 /**
@@ -629,7 +859,7 @@ export const getSOSAlerts = asyncHandler(async (req: Request, res: Response) => 
       .populate('triggeredBy', 'name phoneNumber')
       .populate({
         path: 'rideId',
-        select: '_id status pickup drop finalFare estimatedFare passenger rider',
+        select: '_id status pickup drop finalFare estimatedFare passenger rider vehicleType vehicleNumber vehicleModel',
         populate: [
           { path: 'passenger', select: 'name phoneNumber' },
           { path: 'rider', select: 'name phoneNumber' }
@@ -836,6 +1066,50 @@ export const getRideById = asyncHandler(async (req: Request, res: Response) => {
 });
 
 /**
+ * @route   PUT /api/v1/admin/rides/:id/cancel
+ * @desc    Force close or cancel any active / matching / stuck ride by Admin
+ * @access  Protected (admin, super_admin)
+ */
+export const cancelRideByAdmin = asyncHandler(async (req: Request, res: Response) => {
+  const { reason = 'Administratively closed by operator' } = req.body;
+  const ride = await Ride.findById(req.params.id);
+  if (!ride) throw new ApiError(404, 'Ride not found');
+
+  ride.status = RideStatus.TIMED_OUT;
+  ride.cancellation = {
+    cancelledBy: CancellationBy.ADMIN,
+    reason,
+    cancelledAt: new Date(),
+  };
+
+  // Refund applied wallet balance if any
+  if (ride.walletAmountUsed && ride.walletAmountUsed > 0) {
+    const { PassengerProfile } = await import('../models/PassengerProfile');
+    const passengerProfile = await PassengerProfile.findOne({ user: ride.passenger });
+    if (passengerProfile) {
+      passengerProfile.walletBalance = Number(((passengerProfile.walletBalance || 0) + ride.walletAmountUsed).toFixed(2));
+      await passengerProfile.save();
+    }
+  }
+
+  await ride.save();
+
+  // Socket notification
+  import('../sockets/tracking.socket').then(({ getIo }) => {
+    const io = getIo();
+    if (io) {
+      io.to(`ride:${ride._id}`).emit('ride:cancelled', {
+        rideId: ride._id,
+        reason,
+        cancelledBy: 'admin',
+      });
+    }
+  }).catch(() => {});
+
+  res.status(200).json(new ApiResponse(200, 'Ride closed and marked as cancelled by admin', ride));
+});
+
+/**
  * @route   PUT /api/v1/admin/insurance/:id/status
  * @desc    Update insurance claim status
  * @access  Protected (admin)
@@ -904,12 +1178,26 @@ export const getPassengerById = asyncHandler(async (req: Request, res: Response)
   // Stats & Spending
   const [totalRides, completedRides, cancelledRides, completedRidesList] = await Promise.all([
     Ride.countDocuments({ passenger: user._id }),
-    Ride.countDocuments({ passenger: user._id, status: RideStatus.COMPLETED }),
     Ride.countDocuments({
       passenger: user._id,
-      status: { $in: [RideStatus.PASSENGER_CANCELLED, RideStatus.RIDER_CANCELLED] },
+      status: { $in: [RideStatus.COMPLETED, RideStatus.PAYMENT_COMPLETED, RideStatus.CLOSED] }
     }),
-    Ride.find({ passenger: user._id, status: RideStatus.COMPLETED }).select('finalFare estimatedFare'),
+    Ride.countDocuments({
+      passenger: user._id,
+      status: {
+        $in: [
+          RideStatus.PASSENGER_CANCELLED,
+          RideStatus.RIDER_CANCELLED,
+          RideStatus.NO_SHOW,
+          RideStatus.TIMED_OUT,
+          RideStatus.FAILED_OTP
+        ]
+      },
+    }),
+    Ride.find({
+      passenger: user._id,
+      status: { $in: [RideStatus.COMPLETED, RideStatus.PAYMENT_COMPLETED, RideStatus.CLOSED] }
+    }).select('finalFare estimatedFare'),
   ]);
 
   const totalSpent = completedRidesList.reduce((acc, r) => acc + (r.finalFare || r.estimatedFare || 0), 0);
@@ -996,7 +1284,7 @@ export const updatePayoutRequest = asyncHandler(async (req: Request, res: Respon
         user: payout.rider,
         type: WalletTransactionType.REFUND,
         amount: payout.amount,
-        description: `Refund for rejected payout request`,
+        description: `Refund for rejected payout request: ${remarks || 'Rejected by admin'}`,
         referenceId: payout._id.toString(),
         balanceAfter: riderProfile.walletBalance
       });
@@ -1004,7 +1292,31 @@ export const updatePayoutRequest = asyncHandler(async (req: Request, res: Respon
   }
 
   await payout.save();
-  res.status(200).json(new ApiResponse(200, `Payout ${status}`, payout));
+  await payout.populate([
+    { path: 'rider', select: 'name phoneNumber email' },
+    { path: 'bankAccount' },
+    { path: 'processedBy', select: 'name email role' }
+  ]);
+
+  // Dispatch live push notification
+  try {
+    const riderId = typeof payout.rider === 'object' && (payout.rider as any)._id
+      ? (payout.rider as any)._id.toString()
+      : payout.rider.toString();
+
+    await fcmService.sendToUser(
+      riderId,
+      status === 'completed' ? 'Payout Dispatched! 💰' : 'Payout Request Update',
+      status === 'completed'
+        ? `₹${payout.amount} has been successfully settled to your bank account.`
+        : `Your payout request of ₹${payout.amount} was rejected. Reason: ${remarks || 'Bank detail mismatch'}. Amount refunded to wallet.`,
+      { type: 'PAYOUT_UPDATE', payoutId: payout._id.toString() }
+    );
+  } catch (fcmErr) {
+    console.error('Failed to dispatch payout FCM:', fcmErr);
+  }
+
+  res.status(200).json(new ApiResponse(200, `Payout marked as ${status}`, payout));
 });
 
 /**
@@ -1054,16 +1366,22 @@ export const fetchAnalytics = asyncHandler(async (req: Request, res: Response) =
   const { PayoutRequest } = await import('../models/PayoutRequest');
 
   // Total completed rides
-  const totalRides = await Ride.countDocuments({ status: 'PAYMENT_COMPLETED' } as any);
+  const totalRides = await Ride.countDocuments({
+    status: { $in: [RideStatus.COMPLETED, RideStatus.PAYMENT_COMPLETED, RideStatus.CLOSED] }
+  } as any);
 
   // Total Revenue & Commission
   const aggregation = await Ride.aggregate([
-    { $match: { status: 'PAYMENT_COMPLETED' } },
+    {
+      $match: {
+        status: { $in: [RideStatus.COMPLETED, RideStatus.PAYMENT_COMPLETED, RideStatus.CLOSED] }
+      }
+    },
     {
       $group: {
         _id: null,
-        totalRevenue: { $sum: "$finalFare" },
-        totalCommission: { $sum: "$platformCommission" }
+        totalRevenue: { $sum: { $ifNull: ["$finalFare", "$estimatedFare"] } },
+        totalCommission: { $sum: { $ifNull: ["$platformCommission", 0] } }
       }
     }
   ]);
@@ -1391,16 +1709,30 @@ export const getAdminSupportTickets = asyncHandler(async (req: Request, res: Res
   if (category && category !== 'all') filter.category = category;
 
   if (search) {
+    const matchingUsers = await User.find({
+      $or: [
+        { name: { $regex: search as string, $options: 'i' } },
+        { phoneNumber: { $regex: search as string, $options: 'i' } },
+        { email: { $regex: search as string, $options: 'i' } },
+      ]
+    }).select('_id');
+    const userIds = matchingUsers.map(u => u._id);
+
     filter.$or = [
       { subject: { $regex: search, $options: 'i' } },
       { ticketNumber: { $regex: search, $options: 'i' } },
+      { passenger: { $in: userIds } },
     ];
   }
 
   const [tickets, total] = await Promise.all([
     SupportTicket.find(filter)
-      .populate('passenger', 'name phoneNumber')
-      .populate('ride', '_id status')
+      .populate('passenger', 'name phoneNumber email')
+      .populate({
+        path: 'ride',
+        select: '_id status pickup drop finalFare estimatedFare rider vehicleType vehicleNumber vehicleModel',
+        populate: { path: 'rider', select: 'name phoneNumber' }
+      })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit),
@@ -1429,7 +1761,12 @@ export const getAdminSupportTickets = asyncHandler(async (req: Request, res: Res
 export const getAdminSupportTicketById = asyncHandler(async (req: Request, res: Response) => {
   const ticket = await SupportTicket.findById(req.params.id)
     .populate('passenger', 'name phoneNumber email')
-    .populate('ride', '_id status pickup drop finalFare');
+    .populate({
+      path: 'ride',
+      select: '_id status pickup drop finalFare estimatedFare rider vehicleType vehicleNumber vehicleModel createdAt',
+      populate: { path: 'rider', select: 'name phoneNumber' }
+    })
+    .populate('messages.senderUser', 'name email role');
 
   if (!ticket) throw new ApiError(404, 'Support ticket not found');
   res.status(200).json(new ApiResponse(200, 'Support ticket details fetched', ticket));
@@ -1459,6 +1796,28 @@ export const replySupportTicket = asyncHandler(async (req: Request, res: Respons
   }
 
   await ticket.save();
+  await ticket.populate([
+    { path: 'passenger', select: 'name phoneNumber email' },
+    { path: 'messages.senderUser', select: 'name email role' }
+  ]);
+
+  // Dispatch live push notification to the passenger
+  try {
+    if (ticket.passenger) {
+      const passengerId = typeof ticket.passenger === 'object' && (ticket.passenger as any)._id
+        ? (ticket.passenger as any)._id
+        : ticket.passenger;
+      await fcmService.sendToUser(
+        passengerId.toString(),
+        `Woosh Support Reply (#${ticket.ticketNumber})`,
+        message.trim().slice(0, 120),
+        { type: 'SUPPORT_TICKET_REPLY', ticketId: ticket._id.toString() }
+      );
+    }
+  } catch (fcmErr) {
+    console.error('Failed to dispatch support reply push notification:', fcmErr);
+  }
+
   res.status(200).json(new ApiResponse(200, 'Reply sent', ticket));
 });
 
@@ -1481,7 +1840,13 @@ export const updateSupportTicketStatus = asyncHandler(async (req: Request, res: 
   }
 
   const ticket = await SupportTicket.findByIdAndUpdate(req.params.id, updateData, { new: true })
-    .populate('passenger', 'name phoneNumber');
+    .populate('passenger', 'name phoneNumber email')
+    .populate({
+      path: 'ride',
+      select: '_id status pickup drop finalFare estimatedFare rider vehicleType vehicleNumber vehicleModel',
+      populate: { path: 'rider', select: 'name phoneNumber' }
+    })
+    .populate('messages.senderUser', 'name email role');
 
   if (!ticket) throw new ApiError(404, 'Support ticket not found');
   res.status(200).json(new ApiResponse(200, `Ticket ${status.toLowerCase()}`, ticket));
