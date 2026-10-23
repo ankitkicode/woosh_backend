@@ -545,8 +545,14 @@ export const updateRiderSettings = asyncHandler(async (req: Request, res: Respon
   res.status(200).json(new ApiResponse(200, 'Settings updated successfully', profile));
 });
 
+export const getEmergencyContacts = asyncHandler(async (req: Request, res: Response) => {
+  const user = await User.findById(req.user?._id).select('emergencyContacts');
+  if (!user) throw new ApiError(404, 'User not found');
+  res.status(200).json(new ApiResponse(200, 'Emergency contacts fetched', user.emergencyContacts || []));
+});
+
 export const addEmergencyContact = asyncHandler(async (req: Request, res: Response) => {
-  const { name, phoneNumber } = req.body;
+  const { name, phoneNumber, relationship, isPrimary, sendSosAlerts, autoShareRides } = req.body;
   if (!name || !phoneNumber) throw new ApiError(400, 'Name and phone number are required');
 
   const user = await User.findById(req.user?._id);
@@ -556,7 +562,23 @@ export const addEmergencyContact = asyncHandler(async (req: Request, res: Respon
     throw new ApiError(400, 'Maximum 5 emergency contacts allowed');
   }
 
-  user.emergencyContacts.push({ name, phoneNumber });
+  const isFirstContact = user.emergencyContacts.length === 0;
+  const shouldBePrimary = isPrimary !== undefined ? Boolean(isPrimary) : isFirstContact;
+
+  if (shouldBePrimary) {
+    user.emergencyContacts.forEach((c: any) => {
+      c.isPrimary = false;
+    });
+  }
+
+  user.emergencyContacts.push({
+    name,
+    phoneNumber,
+    relationship: relationship || 'other',
+    isPrimary: shouldBePrimary,
+    sendSosAlerts: sendSosAlerts !== undefined ? Boolean(sendSosAlerts) : true,
+    autoShareRides: autoShareRides !== undefined ? Boolean(autoShareRides) : false,
+  });
   await user.save();
 
   res.status(201).json(new ApiResponse(201, 'Emergency contact added', user.emergencyContacts));
@@ -564,15 +586,31 @@ export const addEmergencyContact = asyncHandler(async (req: Request, res: Respon
 
 export const updateEmergencyContact = asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { name, phoneNumber } = req.body;
+  const { name, phoneNumber, relationship, isPrimary, sendSosAlerts, autoShareRides } = req.body;
 
-  const user = await User.findOneAndUpdate(
-    { _id: req.user?._id, 'emergencyContacts._id': id },
-    { $set: { 'emergencyContacts.$.name': name, 'emergencyContacts.$.phoneNumber': phoneNumber } },
-    { new: true }
-  );
+  const user = await User.findById(req.user?._id);
+  if (!user) throw new ApiError(404, 'User not found');
 
-  if (!user) throw new ApiError(404, 'Contact not found');
+  const contact = (user.emergencyContacts as any).id(id) || user.emergencyContacts.find((c: any) => c._id?.toString() === id);
+  if (!contact) throw new ApiError(404, 'Contact not found');
+
+  if (name !== undefined) contact.name = name;
+  if (phoneNumber !== undefined) contact.phoneNumber = phoneNumber;
+  if (relationship !== undefined) contact.relationship = relationship;
+  if (sendSosAlerts !== undefined) contact.sendSosAlerts = Boolean(sendSosAlerts);
+  if (autoShareRides !== undefined) contact.autoShareRides = Boolean(autoShareRides);
+
+  if (isPrimary !== undefined) {
+    const isPrim = Boolean(isPrimary);
+    if (isPrim) {
+      user.emergencyContacts.forEach((c: any) => {
+        c.isPrimary = false;
+      });
+    }
+    contact.isPrimary = isPrim;
+  }
+
+  await user.save();
 
   res.status(200).json(new ApiResponse(200, 'Emergency contact updated', user.emergencyContacts));
 });

@@ -35,6 +35,7 @@ import {
   ticketReplySchema,
 } from '../validations/passenger.validation';
 import { updateChildSchema, disputeSchema } from '../validations/rider.validation';
+import { getEmergencyContacts, addEmergencyContact, deleteEmergencyContact, updateEmergencyContact } from '../controllers/rider.controller';
 
 const router = Router();
 
@@ -71,5 +72,13 @@ router.get('/support/tickets', getSupportTickets);
 router.get('/support/tickets/:id', getSupportTicketById);
 router.post('/support/tickets/:id/message', validate(ticketReplySchema), addSupportTicketMessage);
 router.put('/support/tickets/:id/close', closeSupportTicket);
+
+// Emergency Contacts
+router.get('/emergency-contacts', getEmergencyContacts);
+router.post('/emergency-contacts', addEmergencyContact);
+router.put('/emergency-contacts/:id', updateEmergencyContact);
+router.delete('/emergency-contacts/:id', deleteEmergencyContact);
+
+
 
 export default router;

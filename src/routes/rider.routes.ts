@@ -7,7 +7,7 @@ import {
   getRiderProfile, updateRiderProfile, submitKYC, resubmitDocument,
   getKYCStatus, toggleOnlineStatus, getEarnings, updateSafetyChecklist, uploadProfileImage, requestPayout,
   addBankAccount, getBankAccounts, setPrimaryBankAccount, updateRiderSettings,
-  addEmergencyContact, updateEmergencyContact, deleteEmergencyContact
+  getEmergencyContacts, addEmergencyContact, updateEmergencyContact, deleteEmergencyContact
 } from '../controllers/rider.controller';
 import { getMonthlyStatement, downloadStatementPdf } from '../controllers/payment.controller';
 import { updateRiderProfileSchema, updateSettingsSchema } from '../validations/rider.validation';
@@ -45,6 +45,7 @@ router.post('/bank-accounts', addBankAccount);
 router.get('/bank-accounts', getBankAccounts);
 router.put('/bank-accounts/:id/primary', setPrimaryBankAccount);
 
+router.get('/emergency-contacts', getEmergencyContacts);
 router.post('/emergency-contacts', addEmergencyContact);
 router.put('/emergency-contacts/:id', updateEmergencyContact);
 router.delete('/emergency-contacts/:id', deleteEmergencyContact);

@@ -44,6 +44,11 @@
       "key": "ticketId",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "contactId",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
@@ -785,6 +790,117 @@
               "host": ["{{baseUrl}}"],
               "path": ["passenger", "children", "{{childId}}"]
             }
+          }
+        }
+      ]
+    },
+    {
+      "name": "6.1. Emergency Contacts (SOS Contacts)",
+      "item": [
+        {
+          "name": "Get All Emergency Contacts",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/passenger/emergency-contacts",
+              "host": ["{{baseUrl}}"],
+              "path": ["passenger", "emergency-contacts"]
+            },
+            "description": "Fetch all registered emergency contacts for the authenticated passenger."
+          }
+        },
+        {
+          "name": "Add Emergency Contact",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if(jsonData.data && Array.isArray(jsonData.data) && jsonData.data.length > 0) {",
+                  "    var last = jsonData.data[jsonData.data.length - 1];",
+                  "    if(last._id) {",
+                  "        pm.collectionVariables.set('contactId', last._id);",
+                  "        console.log('Set contactId to:', last._id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/passenger/emergency-contacts",
+              "host": ["{{baseUrl}}"],
+              "path": ["passenger", "emergency-contacts"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Rajesh Sharma\",\n  \"phoneNumber\": \"9876543210\",\n  \"relationship\": \"parent\",\n  \"isPrimary\": true,\n  \"sendSosAlerts\": true,\n  \"autoShareRides\": false\n}"
+            },
+            "description": "Add new emergency contact for passenger.\n\nRequired:\n- name (string)\n- phoneNumber (string 10 digits)\n\nOptional:\n- relationship ('parent' | 'sibling' | 'friend' | 'partner' | 'other')\n- isPrimary (boolean, default true for first contact)\n- sendSosAlerts (boolean, default true)\n- autoShareRides (boolean, default false)"
+          }
+        },
+        {
+          "name": "Update Emergency Contact",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/passenger/emergency-contacts/{{contactId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["passenger", "emergency-contacts", "{{contactId}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Rajesh Sharma (Updated)\",\n  \"phoneNumber\": \"9876543210\",\n  \"relationship\": \"parent\",\n  \"isPrimary\": true,\n  \"sendSosAlerts\": true,\n  \"autoShareRides\": true\n}"
+            },
+            "description": "Update passenger emergency contact details."
+          }
+        },
+        {
+          "name": "Delete Emergency Contact",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/passenger/emergency-contacts/{{contactId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["passenger", "emergency-contacts", "{{contactId}}"]
+            },
+            "description": "Delete passenger emergency contact by ID."
           }
         }
       ]

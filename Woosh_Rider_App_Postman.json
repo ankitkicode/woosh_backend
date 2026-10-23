@@ -500,7 +500,43 @@
           }
         },
         {
+          "name": "Get All Emergency Contacts",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rider/emergency-contacts",
+              "host": ["{{baseUrl}}"],
+              "path": ["rider", "emergency-contacts"]
+            },
+            "description": "Fetch list of all registered emergency contacts for the authenticated rider."
+          }
+        },
+        {
           "name": "Add Emergency Contact",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if(jsonData.data && Array.isArray(jsonData.data) && jsonData.data.length > 0) {",
+                  "    var last = jsonData.data[jsonData.data.length - 1];",
+                  "    if(last._id) {",
+                  "        pm.collectionVariables.set('contactId', last._id);",
+                  "        console.log('Set contactId to:', last._id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -520,8 +556,9 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Family Contact\",\n  \"phoneNumber\": \"9876543210\"\n}"
-            }
+              "raw": "{\n  \"name\": \"Rajesh Sharma\",\n  \"phoneNumber\": \"9876543210\",\n  \"relationship\": \"parent\",\n  \"isPrimary\": true,\n  \"sendSosAlerts\": true,\n  \"autoShareRides\": false\n}"
+            },
+            "description": "Add new emergency contact.\n\nRequired:\n- name (string)\n- phoneNumber (string 10 digits)\n\nOptional:\n- relationship ('parent' | 'sibling' | 'friend' | 'partner' | 'other')\n- isPrimary (boolean, default true for first contact)\n- sendSosAlerts (boolean, default true)\n- autoShareRides (boolean, default false)"
           }
         },
         {
@@ -545,8 +582,9 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Emergency Contact Updated\",\n  \"phoneNumber\": \"9123456789\"\n}"
-            }
+              "raw": "{\n  \"name\": \"Rajesh Sharma (Updated)\",\n  \"phoneNumber\": \"9876543210\",\n  \"relationship\": \"parent\",\n  \"isPrimary\": true,\n  \"sendSosAlerts\": true,\n  \"autoShareRides\": true\n}"
+            },
+            "description": "Modify emergency contact fields by contact ID.\n\nOptional:\n- name\n- phoneNumber\n- relationship\n- isPrimary\n- sendSosAlerts\n- autoShareRides"
           }
         },
         {
@@ -563,7 +601,8 @@
               "raw": "{{baseUrl}}/rider/emergency-contacts/{{contactId}}",
               "host": ["{{baseUrl}}"],
               "path": ["rider", "emergency-contacts", "{{contactId}}"]
-            }
+            },
+            "description": "Delete emergency contact by ID."
           }
         }
       ]
