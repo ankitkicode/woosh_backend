@@ -20,15 +20,15 @@ import { whatsappService } from '../services/whatsapp.service';
 export const getRiderProfile = asyncHandler(async (req: Request, res: Response) => {
   const user = await User.findById(req.user?._id).select('-refreshToken');
   const riderProfile = await RiderProfile.findOne({ user: req.user?._id });
-  
+
   let acceptanceRate = 0;
   if (riderProfile && riderProfile.totalRideRequests > 0) {
     acceptanceRate = Math.round((riderProfile.acceptedRides / riderProfile.totalRideRequests) * 100);
   }
 
-  res.status(200).json(new ApiResponse(200, 'Profile fetched', { 
-    user, 
-    riderProfile: riderProfile ? { ...riderProfile.toObject(), acceptanceRate } : null 
+  res.status(200).json(new ApiResponse(200, 'Profile fetched', {
+    user,
+    riderProfile: riderProfile ? { ...riderProfile.toObject(), acceptanceRate } : null
   }));
 });
 
@@ -38,8 +38,8 @@ export const getRiderProfile = asyncHandler(async (req: Request, res: Response) 
  * @access  Protected (rider)
  */
 export const updateRiderProfile = asyncHandler(async (req: Request, res: Response) => {
-  const { name, email, gender, dateOfBirth, city, state, vehicleNumber, vehicleModel, vehicleColor, areas, emergencyContacts } = req.body;
-  
+  const { name, email, gender, dateOfBirth, city, state, vehicleNumber, vehicleModel, vehicleColor, vehicleType, areas, emergencyContacts } = req.body;
+
   const existingProfile = await RiderProfile.findOne({ user: req.user?._id });
   const isNewProfile = !existingProfile;
 
@@ -53,8 +53,8 @@ export const updateRiderProfile = asyncHandler(async (req: Request, res: Respons
   }
 
   const user = await User.findByIdAndUpdate(
-    req.user?._id, 
-    { name, email, gender, dateOfBirth, city, state, emergencyContacts: normalizedContacts }, 
+    req.user?._id,
+    { name, email, gender, dateOfBirth, city, state, emergencyContacts: normalizedContacts },
     { new: true, runValidators: true }
   ).select('-refreshToken');
 
@@ -66,7 +66,7 @@ export const updateRiderProfile = asyncHandler(async (req: Request, res: Respons
 
   const riderProfile = await RiderProfile.findOneAndUpdate(
     { user: req.user?._id },
-    { vehicleNumber, vehicleModel, vehicleColor, areas: parsedAreas },
+    { vehicleNumber, vehicleModel, vehicleColor, ...(vehicleType && { vehicleType }), areas: parsedAreas },
     { new: true, upsert: true, runValidators: true }
   );
 
@@ -110,7 +110,7 @@ export const submitKYC = asyncHandler(async (req: Request, res: Response) => {
 
   const { vehicleNumber } = req.body;
   let profile = await RiderProfile.findOne({ user: req.user?._id });
-  
+
   const docTypes = [
     DocumentType.AADHAAR, DocumentType.DRIVING_LICENSE, DocumentType.PAN, DocumentType.RC_BOOK,
     DocumentType.VEHICLE_INSURANCE, DocumentType.PUC, DocumentType.POLICE_VERIFICATION,
@@ -122,13 +122,13 @@ export const submitKYC = asyncHandler(async (req: Request, res: Response) => {
     for (const docType of docTypes) {
       if (files[docType]?.[0]) {
         const existingDocIndex = profile.documents.findIndex(d => d.type === docType);
-        const newDoc = { 
-          type: docType, 
-          url: `/uploads/${files[docType][0].filename}`, 
+        const newDoc = {
+          type: docType,
+          url: `/uploads/${files[docType][0].filename}`,
           status: 'PENDING' as 'PENDING',
           rejectionReason: undefined
         };
-        
+
         if (existingDocIndex >= 0) {
           profile.documents[existingDocIndex] = newDoc;
         } else {
@@ -137,23 +137,23 @@ export const submitKYC = asyncHandler(async (req: Request, res: Response) => {
       }
     }
     profile.vehicleNumber = vehicleNumber || profile.vehicleNumber;
-    
+
     // Check if any document is pending/rejected to update overall status
     const hasRejected = profile.documents.some(d => d.status === 'REJECTED');
     if (!hasRejected) {
       profile.kycStatus = KYCStatus.UNDER_REVIEW;
       profile.kycRejectionReason = undefined;
     }
-    
+
     await profile.save();
   } else {
     // New profile
     const documents: { type: DocumentType; url: string; status: 'PENDING'; rejectionReason?: string }[] = [];
     for (const docType of docTypes) {
       if (files[docType]?.[0]) {
-        documents.push({ 
-          type: docType, 
-          url: `/uploads/${files[docType][0].filename}`, 
+        documents.push({
+          type: docType,
+          url: `/uploads/${files[docType][0].filename}`,
           status: 'PENDING'
         });
       }
@@ -294,7 +294,7 @@ export const updateSafetyChecklist = asyncHandler(async (req: Request, res: Resp
   const { helmetAvailable, firstAidKitAvailable, sanitaryPadsAvailable, phoneBatteryCheck, faceVerified } = req.body;
   const profile = await RiderProfile.findOneAndUpdate(
     { user: req.user?._id },
-    { 
+    {
       safetyChecklist: {
         helmetAvailable,
         firstAidKitAvailable,
@@ -316,13 +316,19 @@ export const updateSafetyChecklist = asyncHandler(async (req: Request, res: Resp
  * @access  Protected (rider, approved KYC only)
  */
 export const toggleOnlineStatus = asyncHandler(async (req: Request, res: Response) => {
-  const profile = await RiderProfile.findOne({ user: req.user?._id });
-  if (!profile) throw new ApiError(404, 'Rider profile not found');
-  if (profile.kycStatus !== KYCStatus.APPROVED) {
-    throw new ApiError(403, 'KYC not approved yet. You cannot go online until approval.');
+  const targetId = req.params.id || req.body?.riderId || req.user?._id;
+  let profile = await RiderProfile.findOne({ user: targetId });
+  if (!profile && mongoose.Types.ObjectId.isValid(targetId)) {
+    profile = await RiderProfile.findById(targetId);
   }
+  if (!profile) throw new ApiError(404, 'Rider profile not found');
 
-  if (!profile.isOnline) {
+  const isAdmin = req.user?.role === 'admin' || req.user?.role === 'super_admin';
+
+  if (!profile.isOnline && !isAdmin) {
+    if (profile.kycStatus !== KYCStatus.APPROVED) {
+      throw new ApiError(403, 'KYC not approved yet. You cannot go online until approval.');
+    }
     // Going online: verify safety checklist
     const checklist = profile.safetyChecklist;
     if (!checklist || !checklist.checkedAt) {
@@ -340,7 +346,7 @@ export const toggleOnlineStatus = asyncHandler(async (req: Request, res: Respons
   profile.isOnline = !profile.isOnline;
   await profile.save();
 
-  res.status(200).json(new ApiResponse(200, `You are now ${profile.isOnline ? 'online' : 'offline'}`, {
+  res.status(200).json(new ApiResponse(200, `Rider is now ${profile.isOnline ? 'online' : 'offline'}`, {
     isOnline: profile.isOnline,
   }));
 });
@@ -367,26 +373,29 @@ export const getEarnings = asyncHandler(async (req: Request, res: Response) => {
   const [lifetimeResult, dailyResult, weeklyResult, monthlyResult] = await Promise.all([
     Ride.aggregate([
       { $match: { rider: riderId, status: { $in: [RideStatus.COMPLETED, RideStatus.PAYMENT_COMPLETED] } } },
-      { $group: { 
-          _id: null, 
-          total: { $sum: { $ifNull: ["$riderEarnings", { $subtract: ["$finalFare", { $ifNull: ["$platformCommission", { $multiply: ["$finalFare", 0.2] }] }] }] } }, 
-          count: { $sum: 1 } 
-        } 
+      {
+        $group: {
+          _id: null,
+          total: { $sum: { $ifNull: ["$riderEarnings", { $subtract: ["$finalFare", { $ifNull: ["$platformCommission", { $multiply: ["$finalFare", 0.2] }] }] }] } },
+          count: { $sum: 1 }
+        }
       }
     ]),
     Ride.aggregate([
       { $match: { rider: riderId, status: { $in: [RideStatus.COMPLETED, RideStatus.PAYMENT_COMPLETED] }, rideEndedAt: { $gte: startOfDay } } },
-      { $group: { 
-          _id: null, 
-          total: { $sum: { $ifNull: ["$riderEarnings", { $subtract: ["$finalFare", { $ifNull: ["$platformCommission", { $multiply: ["$finalFare", 0.2] }] }] }] } }, 
-          count: { $sum: 1 } 
-        } 
+      {
+        $group: {
+          _id: null,
+          total: { $sum: { $ifNull: ["$riderEarnings", { $subtract: ["$finalFare", { $ifNull: ["$platformCommission", { $multiply: ["$finalFare", 0.2] }] }] }] } },
+          count: { $sum: 1 }
+        }
       }
     ]),
     Ride.aggregate([
       { $match: { rider: riderId, status: { $in: [RideStatus.COMPLETED, RideStatus.PAYMENT_COMPLETED] }, rideEndedAt: { $gte: startOfWeek } } },
-      { $group: { 
-          _id: { $dayOfWeek: "$rideEndedAt" }, 
+      {
+        $group: {
+          _id: { $dayOfWeek: "$rideEndedAt" },
           total: { $sum: { $ifNull: ["$riderEarnings", { $subtract: ["$finalFare", { $ifNull: ["$platformCommission", { $multiply: ["$finalFare", 0.2] }] }] }] } },
           count: { $sum: 1 }
         }
@@ -394,11 +403,12 @@ export const getEarnings = asyncHandler(async (req: Request, res: Response) => {
     ]),
     Ride.aggregate([
       { $match: { rider: riderId, status: { $in: [RideStatus.COMPLETED, RideStatus.PAYMENT_COMPLETED] }, rideEndedAt: { $gte: startOfMonth } } },
-      { $group: { 
-          _id: null, 
-          total: { $sum: { $ifNull: ["$riderEarnings", { $subtract: ["$finalFare", { $ifNull: ["$platformCommission", { $multiply: ["$finalFare", 0.2] }] }] }] } }, 
-          count: { $sum: 1 } 
-        } 
+      {
+        $group: {
+          _id: null,
+          total: { $sum: { $ifNull: ["$riderEarnings", { $subtract: ["$finalFare", { $ifNull: ["$platformCommission", { $multiply: ["$finalFare", 0.2] }] }] }] } },
+          count: { $sum: 1 }
+        }
       }
     ])
   ]);
@@ -420,10 +430,10 @@ export const getEarnings = asyncHandler(async (req: Request, res: Response) => {
   let weeklyEarnings = 0;
   let weeklyRides = 0;
   const dailyBreakdown = [0, 0, 0, 0, 0, 0, 0];
-  
+
   weeklyResult.forEach(item => {
     const dayIndex = item._id === 1 ? 6 : item._id - 2;
-    if(dayIndex >= 0 && dayIndex <= 6) {
+    if (dayIndex >= 0 && dayIndex <= 6) {
       dailyBreakdown[dayIndex] = item.total;
     }
     weeklyEarnings += item.total;
@@ -433,12 +443,12 @@ export const getEarnings = asyncHandler(async (req: Request, res: Response) => {
   const cashDues = profile.walletBalance < 0 ? Math.abs(profile.walletBalance) : 0;
 
   res.status(200).json(new ApiResponse(200, 'Earnings fetched', {
-    summary: { 
-      totalEarnings, 
-      walletBalance: profile.walletBalance, 
+    summary: {
+      totalEarnings,
+      walletBalance: profile.walletBalance,
       cashDues,
       onlineHours: profile.onlineHours,
-      totalRides, 
+      totalRides,
       rating: profile.rating,
       todayEarnings,
       todayRides,
@@ -511,7 +521,7 @@ export const requestPayout = asyncHandler(async (req: Request, res: Response) =>
  */
 export const updateRiderSettings = asyncHandler(async (req: Request, res: Response) => {
   const { preferences, safetyPreferences } = req.body;
-  
+
   const updateData: any = {};
   if (preferences) {
     for (const [key, value] of Object.entries(preferences)) {
@@ -541,14 +551,14 @@ export const addEmergencyContact = asyncHandler(async (req: Request, res: Respon
 
   const user = await User.findById(req.user?._id);
   if (!user) throw new ApiError(404, 'User not found');
-  
+
   if (user.emergencyContacts.length >= 5) {
     throw new ApiError(400, 'Maximum 5 emergency contacts allowed');
   }
 
   user.emergencyContacts.push({ name, phoneNumber });
   await user.save();
-  
+
   res.status(201).json(new ApiResponse(201, 'Emergency contact added', user.emergencyContacts));
 });
 
@@ -625,3 +635,4 @@ export const setPrimaryBankAccount = asyncHandler(async (req: Request, res: Resp
 
   res.status(200).json(new ApiResponse(200, 'Primary bank account updated', account));
 });
+

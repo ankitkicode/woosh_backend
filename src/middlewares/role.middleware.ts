@@ -15,7 +15,10 @@ export const authorize = (...roles: UserRole[]) => {
       return next();
     }
     
-    if (!roles.includes(req.user.role as UserRole)) {
+    // Normalize role string (e.g. 'superadmin' -> 'super_admin')
+    const userRole = (req.user.role === 'superadmin' ? UserRole.SUPER_ADMIN : req.user.role) as UserRole;
+    
+    if (!roles.includes(userRole)) {
       return next(new ApiError(403, `Access denied. This route requires one of: [${roles.join(', ')}]`));
     }
     next();

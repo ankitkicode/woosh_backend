@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { PaymentMethod } from '../config/constants';
+import { PaymentMethod, VehicleType } from '../config/constants';
 
 const coordinateSchema = z.object({
   latitude: z.number().min(-90).max(90),
@@ -10,11 +10,13 @@ const coordinateSchema = z.object({
 export const rideEstimateSchema = z.object({
   pickup: coordinateSchema,
   drop: coordinateSchema,
+  vehicleType: z.nativeEnum(VehicleType).optional().default(VehicleType.SCOOTER),
 });
 
 export const requestRideSchema = z.object({
   pickup: coordinateSchema,
   drop: coordinateSchema,
+  vehicleType: z.nativeEnum(VehicleType).optional().default(VehicleType.SCOOTER),
   paymentMethod: z.nativeEnum(PaymentMethod).default(PaymentMethod.CASH),
   childProfileId: z.string().optional(),
   applyWallet: z.boolean().optional(),

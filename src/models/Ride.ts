@@ -1,6 +1,6 @@
 import mongoose, { Document, Schema } from 'mongoose';
 import {
-  RideStatus, PaymentMethod, PaymentStatus, CancellationBy,
+  RideStatus, PaymentMethod, PaymentStatus, CancellationBy, VehicleType,
 } from '../config/constants';
 
 interface ICoordinate {
@@ -43,6 +43,7 @@ export interface IRide extends Document {
   pickup: ICoordinate;
   drop: ICoordinate;
   status: RideStatus;
+  vehicleType?: VehicleType;
   otp: string;                   // 4-digit OTP to start ride
   distanceKm?: number;
   durationMinutes?: number;
@@ -95,6 +96,7 @@ const rideSchema = new Schema<IRide>(
     pickup: { type: coordinateSchema, required: true },
     drop: { type: coordinateSchema, required: true },
     status: { type: String, enum: Object.values(RideStatus), default: RideStatus.REQUESTED, index: true },
+    vehicleType: { type: String, enum: Object.values(VehicleType), default: VehicleType.SCOOTER, index: true },
     otp: { type: String, required: true },
     distanceKm: { type: Number },
     durationMinutes: { type: Number },

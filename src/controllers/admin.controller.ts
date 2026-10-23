@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
+import bcrypt from 'bcryptjs';
 import { asyncHandler } from '../utils/asyncHandler';
 import { ApiResponse } from '../utils/ApiResponse';
 import { ApiError } from '../utils/ApiError';
@@ -16,6 +17,8 @@ import { ChildProfile } from '../models/ChildProfile';
 import { Admin } from '../models/Admin';
 import { generateAccessToken, generateRefreshToken } from '../utils/generateToken';
 import { PayoutRequest } from '../models/PayoutRequest';
+import { SupportTicket } from '../models/SupportTicket';
+import { Broadcast } from '../models/Broadcast';
 import { fcmService } from '../services/fcm.service';
 
 /**
@@ -75,7 +78,10 @@ export const adminLogin = asyncHandler(async (req: Request, res: Response) => {
 export const getDashboard = asyncHandler(async (req: Request, res: Response) => {
   const [
     totalPassengers, totalRiders, totalRides, activeRides,
-    pendingKYC, openComplaints, completedRides, chartData, trends, revenueResult
+    pendingKYC, openComplaints, completedRides, cancelledRides,
+    activeSOS, onlineRidersCount, openSupportTickets,
+    chartData, trends, revenueResult,
+    onlineRiders, activeRidesList
   ] = await Promise.all([
     User.countDocuments({ role: { $in: ['passenger', 'both'] } } as Record<string, unknown>),
     User.countDocuments({ role: { $in: ['rider', 'both'] } } as Record<string, unknown>),
@@ -84,18 +90,34 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
     RiderProfile.countDocuments({ kycStatus: KYCStatus.UNDER_REVIEW }),
     Dispute.countDocuments({ status: ComplaintStatus.OPEN }),
     Ride.countDocuments({ status: RideStatus.COMPLETED }),
+    Ride.countDocuments({ status: { $in: [RideStatus.RIDER_CANCELLED, RideStatus.PASSENGER_CANCELLED] } }),
+    SOSAlert.countDocuments({ status: 'active' }),
+    RiderProfile.countDocuments({ isOnline: true }),
+    SupportTicket.countDocuments({ status: { $in: ['OPEN', 'IN_PROGRESS'] } }),
     getChartData(),
     getTrendsData(),
     Ride.aggregate([
       { $match: { status: { $in: [RideStatus.COMPLETED, RideStatus.PAYMENT_COMPLETED] }, finalFare: { $exists: true, $ne: null } } },
       { $group: { _id: null, totalRevenue: { $sum: '$finalFare' } } },
-    ])
+    ]),
+    RiderProfile.find({ isOnline: true })
+      .populate('user', 'name phoneNumber')
+      .select('user vehicleNumber vehicleModel vehicleType currentLocation isOnline totalRides')
+      .limit(10),
+    Ride.find({ status: { $in: [RideStatus.ACCEPTED, RideStatus.STARTED] } })
+      .populate('passenger', 'name phoneNumber')
+      .populate('rider', 'name phoneNumber')
+      .select('passenger rider pickup drop status estimatedFare finalFare createdAt')
+      .limit(10),
   ]);
 
   const totalRevenue = (revenueResult[0]?.totalRevenue || 0);
 
   res.status(200).json(new ApiResponse(200, 'Dashboard fetched', {
-    totalPassengers, totalRiders, totalRides, activeRides, pendingKYC, openComplaints, completedRides, totalRevenue,
+    totalPassengers, totalRiders, totalRides, activeRides, pendingKYC,
+    openComplaints, completedRides, cancelledRides, activeSOS,
+    onlineRidersCount, openSupportTickets, totalRevenue,
+    onlineRiders, activeRidesList,
     revenueData: chartData.revenueData,
     rideVolumeData: chartData.rideVolumeData,
     trends
@@ -152,7 +174,7 @@ export const getAllRiders = asyncHandler(async (req: Request, res: Response) => 
 
   const [riders, total] = await Promise.all([
     RiderProfile.find(filter)
-      .populate('user', 'name phoneNumber createdAt isActive')
+      .populate('user', 'name phoneNumber email city createdAt isActive')
       .skip(skip).limit(limit).sort({ createdAt: -1 }),
     RiderProfile.countDocuments(filter),
   ]);
@@ -208,7 +230,7 @@ export const approveRider = asyncHandler(async (req: Request, res: Response) => 
   if (!profile && mongoose.Types.ObjectId.isValid(riderId)) {
     profile = await RiderProfile.findOne({ user: riderId });
   }
-  
+
   if (!profile) throw new ApiError(404, 'Rider profile not found');
 
   // Auto-approve all documents if they are not already approved
@@ -316,7 +338,7 @@ export const deleteRider = asyncHandler(async (req: Request, res: Response) => {
 
   // Delete the associated user
   await User.findByIdAndDelete(profile.user);
-  
+
   // Delete the rider profile
   await RiderProfile.findByIdAndDelete(profile._id);
 
@@ -365,7 +387,7 @@ export const bulkUpdatePayouts = asyncHandler(async (req: Request, res: Response
 
   // Find all pending payouts in this list
   const payouts = await PayoutRequest.find({ _id: { $in: payoutIds }, status: 'pending' } as any);
-  
+
   const processedCount = payouts.length;
   if (processedCount === 0) {
     throw new ApiError(400, 'No valid pending payouts found for the provided IDs');
@@ -379,7 +401,7 @@ export const bulkUpdatePayouts = asyncHandler(async (req: Request, res: Response
       if (riderProfile) {
         riderProfile.walletBalance += payout.amount;
         await riderProfile.save();
-        
+
         await WalletTransaction.create({
           user: payout.rider,
           type: WalletTransactionType.TOPUP,
@@ -390,13 +412,13 @@ export const bulkUpdatePayouts = asyncHandler(async (req: Request, res: Response
         });
       }
     }
-    
+
     payout.status = status;
     payout.processedAt = new Date();
     payout.processedBy = req.user?._id as unknown as mongoose.Types.ObjectId;
     payout.remarks = remarks;
     payout.transactionRef = transactionRef;
-    
+
     await payout.save();
   }
 
@@ -441,7 +463,7 @@ export const updateDocumentStatus = asyncHandler(async (req: Request, res: Respo
   // Check overall KYC status based on documents
   const allApproved = profile.documents.length > 0 && profile.documents.every(d => d.status === 'APPROVED');
   const anyRejected = profile.documents.some(d => d.status === 'REJECTED');
-  
+
   if (allApproved) {
     profile.kycStatus = KYCStatus.APPROVED;
     profile.kycRejectionReason = undefined;
@@ -568,6 +590,9 @@ export const getUsers = asyncHandler(async (req: Request, res: Response) => {
       filter.role = role as string;
     }
   }
+  if (req.query.isActive !== undefined && req.query.isActive !== 'all') {
+    filter.isActive = req.query.isActive === 'true';
+  }
   if (search) {
     filter.$or = [
       { name: { $regex: search, $options: 'i' } },
@@ -602,7 +627,15 @@ export const getSOSAlerts = asyncHandler(async (req: Request, res: Response) => 
   const [alerts, total] = await Promise.all([
     SOSAlert.find(filter)
       .populate('triggeredBy', 'name phoneNumber')
-      .populate('rideId', '_id status')
+      .populate({
+        path: 'rideId',
+        select: '_id status pickup drop finalFare estimatedFare passenger rider',
+        populate: [
+          { path: 'passenger', select: 'name phoneNumber' },
+          { path: 'rider', select: 'name phoneNumber' }
+        ]
+      })
+      .populate('resolvedBy', 'name email')
       .sort({ createdAt: -1 }).skip(skip).limit(limit),
     SOSAlert.countDocuments(filter),
   ]);
@@ -721,11 +754,13 @@ export const getAllRides = asyncHandler(async (req: Request, res: Response) => {
   // Status filter
   if (status && status !== 'all') {
     if (status === 'active') {
-      filter.status = { $in: [
-        RideStatus.REQUESTED, RideStatus.RIDER_SEARCH, RideStatus.RIDER_ASSIGNED,
-        RideStatus.ACCEPTED, RideStatus.RIDER_EN_ROUTE, RideStatus.RIDER_ARRIVED,
-        RideStatus.OTP_VERIFICATION, RideStatus.STARTED, RideStatus.IN_PROGRESS
-      ]};
+      filter.status = {
+        $in: [
+          RideStatus.REQUESTED, RideStatus.RIDER_SEARCH, RideStatus.RIDER_ASSIGNED,
+          RideStatus.ACCEPTED, RideStatus.RIDER_EN_ROUTE, RideStatus.RIDER_ARRIVED,
+          RideStatus.OTP_VERIFICATION, RideStatus.STARTED, RideStatus.IN_PROGRESS
+        ]
+      };
     } else if (status === 'completed') {
       filter.status = { $in: [RideStatus.COMPLETED, RideStatus.PAYMENT_COMPLETED, RideStatus.CLOSED] };
     } else if (status === 'cancelled') {
@@ -784,7 +819,7 @@ export const getRideById = asyncHandler(async (req: Request, res: Response) => {
   let riderProfile = null;
   if (ride.rider) {
     riderProfile = await RiderProfile.findOne({ user: ride.rider._id })
-      .select('vehicleNumber vehicleModel vehicleColor rating profileImage');
+      .select('vehicleNumber vehicleModel vehicleColor vehicleType rating profileImage');
   }
 
   // Get SOS alerts for this ride
@@ -833,29 +868,97 @@ export const updateInsuranceClaimStatus = asyncHandler(async (req: Request, res:
  * @access  Protected (admin)
  */
 export const getPassengerById = asyncHandler(async (req: Request, res: Response) => {
-  const user = await User.findById(req.params.id).select('-sessions');
-  if (!user) throw new ApiError(404, 'Passenger not found');
-  if (user.role !== 'passenger' && user.role !== 'both') throw new ApiError(400, 'User is not a passenger');
+  const passengerId = req.params.id as string;
+  let user = await User.findById(passengerId).select('-sessions');
+  const { PassengerProfile } = await import('../models/PassengerProfile');
+  let passengerProfile = null;
+
+  if (!user && mongoose.Types.ObjectId.isValid(passengerId)) {
+    passengerProfile = await PassengerProfile.findById(passengerId);
+    if (passengerProfile) {
+      user = await User.findById(passengerProfile.user).select('-sessions');
+    }
+  }
+
+  if (!user) throw new ApiError(404, 'Passenger account not found');
+
+  if (!passengerProfile) {
+    passengerProfile = await PassengerProfile.findOne({ user: user._id });
+  }
 
   // Child profiles
   const childProfiles = await ChildProfile.find({ passenger: user._id });
 
-  // Recent rides
+  // Recent rides with full route details
   const recentRides = await Ride.find({ passenger: user._id })
     .populate('rider', 'name phoneNumber')
-    .sort({ createdAt: -1 }).limit(10);
+    .select('rider passenger status pickup drop finalFare estimatedFare paymentMethod createdAt')
+    .sort({ createdAt: -1 })
+    .limit(10);
 
   // Wallet transactions
   const transactions = await WalletTransaction.find({ user: user._id })
-    .sort({ createdAt: -1 }).limit(10);
+    .sort({ createdAt: -1 })
+    .limit(10);
 
-  // Stats
-  const totalRides = await Ride.countDocuments({ passenger: user._id });
-  const completedRides = await Ride.countDocuments({ passenger: user._id, status: RideStatus.COMPLETED });
+  // Stats & Spending
+  const [totalRides, completedRides, cancelledRides, completedRidesList] = await Promise.all([
+    Ride.countDocuments({ passenger: user._id }),
+    Ride.countDocuments({ passenger: user._id, status: RideStatus.COMPLETED }),
+    Ride.countDocuments({
+      passenger: user._id,
+      status: { $in: [RideStatus.PASSENGER_CANCELLED, RideStatus.RIDER_CANCELLED] },
+    }),
+    Ride.find({ passenger: user._id, status: RideStatus.COMPLETED }).select('finalFare estimatedFare'),
+  ]);
+
+  const totalSpent = completedRidesList.reduce((acc, r) => acc + (r.finalFare || r.estimatedFare || 0), 0);
+  const walletBalance = passengerProfile?.walletBalance ?? 0;
+  const rating = passengerProfile?.rating ?? 5.0;
 
   res.status(200).json(new ApiResponse(200, 'Passenger details fetched', {
-    user, childProfiles, recentRides, transactions, totalRides, completedRides,
+    user,
+    profile: passengerProfile,
+    passengerProfile,
+    childProfiles,
+    recentRides,
+    transactions,
+    totalRides,
+    completedRides,
+    cancelledRides,
+    totalSpent,
+    walletBalance,
+    rating,
   }));
+});
+
+/**
+ * @route   DELETE /api/v1/admin/passengers/:id
+ * @desc    Delete a passenger profile and associated user
+ * @access  Protected (admin)
+ */
+export const deletePassenger = asyncHandler(async (req: Request, res: Response) => {
+  const passengerId = req.params.id as string;
+  let user = await User.findById(passengerId);
+  const { PassengerProfile } = await import('../models/PassengerProfile');
+
+  if (!user && mongoose.Types.ObjectId.isValid(passengerId)) {
+    const profile = await PassengerProfile.findById(passengerId);
+    if (profile) {
+      user = await User.findById(profile.user);
+    }
+  }
+
+  if (!user) throw new ApiError(404, 'Passenger account not found');
+
+  // Delete passenger profile
+  await PassengerProfile.deleteOne({ user: user._id });
+  // Delete child profiles
+  await ChildProfile.deleteMany({ passenger: user._id });
+  // Delete user
+  await User.findByIdAndDelete(user._id);
+
+  res.status(200).json(new ApiResponse(200, 'Passenger deleted successfully', null));
 });
 
 /**
@@ -865,7 +968,7 @@ export const getPassengerById = asyncHandler(async (req: Request, res: Response)
  */
 export const updatePayoutRequest = asyncHandler(async (req: Request, res: Response) => {
   const { status, remarks, transactionRef } = req.body;
-  
+
   if (!['approved', 'rejected', 'completed'].includes(status)) {
     throw new ApiError(400, 'Invalid status');
   }
@@ -949,18 +1052,20 @@ export const getRiderWalletHistory = asyncHandler(async (req: Request, res: Resp
 export const fetchAnalytics = asyncHandler(async (req: Request, res: Response) => {
   const { Ride } = await import('../models/Ride');
   const { PayoutRequest } = await import('../models/PayoutRequest');
-  
+
   // Total completed rides
   const totalRides = await Ride.countDocuments({ status: 'PAYMENT_COMPLETED' } as any);
 
   // Total Revenue & Commission
   const aggregation = await Ride.aggregate([
     { $match: { status: 'PAYMENT_COMPLETED' } },
-    { $group: {
-      _id: null,
-      totalRevenue: { $sum: "$finalFare" },
-      totalCommission: { $sum: "$platformCommission" }
-    }}
+    {
+      $group: {
+        _id: null,
+        totalRevenue: { $sum: "$finalFare" },
+        totalCommission: { $sum: "$platformCommission" }
+      }
+    }
   ]);
 
   const totalRevenue = aggregation.length > 0 ? aggregation[0].totalRevenue : 0;
@@ -969,10 +1074,12 @@ export const fetchAnalytics = asyncHandler(async (req: Request, res: Response) =
   // Total Payouts Sent
   const payoutAgg = await PayoutRequest.aggregate([
     { $match: { status: 'completed' } },
-    { $group: {
-      _id: null,
-      totalPayouts: { $sum: "$amount" }
-    }}
+    {
+      $group: {
+        _id: null,
+        totalPayouts: { $sum: "$amount" }
+      }
+    }
   ]);
 
   const totalPayouts = payoutAgg.length > 0 ? payoutAgg[0].totalPayouts : 0;
@@ -991,16 +1098,28 @@ export const fetchAnalytics = asyncHandler(async (req: Request, res: Response) =
  * @access  Protected (Admin / Super Admin)
  */
 export const broadcastNotification = asyncHandler(async (req: Request, res: Response) => {
-  const { target = 'ALL', title, body, city, platform, data, imageUrl } = req.body;
+  const target = req.body.target || 'ALL';
+  const title = (req.body.title || req.body.heading || req.body.subject || '').trim();
+  const body = (req.body.body || req.body.message || req.body.content || req.body.text || '').trim();
+  const { city, platform, data, imageUrl, type = 'ANNOUNCEMENT' } = req.body;
 
   if (!title || !body) {
     throw new ApiError(400, 'Title and Body are required for notification');
   }
 
+  let adminName = 'Admin';
+  try {
+    const admin = await Admin.findById(req.user?._id);
+    if (admin) adminName = admin.name;
+  } catch (e) {
+    // quiet
+  }
+
   const payloadData: Record<string, string> = {
     ...(data || {}),
     ...(imageUrl ? { imageUrl } : {}),
-    sentBy: 'ADMIN',
+    type,
+    sentBy: adminName,
     timestamp: new Date().toISOString(),
   };
 
@@ -1013,7 +1132,22 @@ export const broadcastNotification = asyncHandler(async (req: Request, res: Resp
     platform
   );
 
+  const broadcastLog = await Broadcast.create({
+    title: title.trim(),
+    body: body.trim(),
+    target,
+    city: city || 'ALL_CITIES',
+    platform: platform || 'ALL',
+    type,
+    imageUrl,
+    data: payloadData,
+    sentBy: req.user?._id,
+    sentByName: adminName,
+    sentCount: result.sentCount,
+  });
+
   res.status(200).json(new ApiResponse(200, `Broadcast notification sent to ${result.sentCount} active devices`, {
+    broadcast: broadcastLog,
     target,
     platform: platform || 'ALL_PLATFORMS',
     city: city || 'ALL_CITIES',
@@ -1023,25 +1157,70 @@ export const broadcastNotification = asyncHandler(async (req: Request, res: Resp
 });
 
 /**
+ * @route   GET /api/v1/admin/notifications/broadcasts
+ * @desc    Get broadcast notification history
+ * @access  Protected (Admin / Super Admin)
+ */
+export const getBroadcastHistory = asyncHandler(async (req: Request, res: Response) => {
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 20;
+  const skip = (page - 1) * limit;
+
+  const [broadcasts, total] = await Promise.all([
+    Broadcast.find()
+      .populate('sentBy', 'name email role')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit),
+    Broadcast.countDocuments(),
+  ]);
+
+  res.status(200).json(new ApiResponse(200, 'Broadcast history fetched', {
+    broadcasts,
+    total,
+    page,
+    limit,
+    totalPages: Math.ceil(total / limit),
+  }));
+});
+
+/**
  * @route   POST /api/v1/admin/notifications/send-user
  * @desc    Send push notification to a specific user (Passenger or Rider)
  * @access  Protected (Admin / Super Admin)
  */
 export const sendUserNotification = asyncHandler(async (req: Request, res: Response) => {
-  const { userId, title, body, data, imageUrl } = req.body;
+  let userId = req.body.userId || req.body.user || req.body.id;
+  let phoneNumber = req.body.phoneNumber || req.body.phone || req.body.mobile;
+  const title = (req.body.title || req.body.heading || req.body.subject || '').trim();
+  const body = (req.body.body || req.body.message || req.body.content || req.body.text || '').trim();
+  const { type = 'GENERAL', data, imageUrl } = req.body;
 
-  if (!userId || !title || !body) {
-    throw new ApiError(400, 'userId, title, and body are required');
+  if (!title || !body) {
+    throw new ApiError(400, 'Title and body are required');
   }
 
-  const user = await User.findById(userId);
-  if (!user) {
-    throw new ApiError(404, 'User not found');
+  if (!userId && phoneNumber) {
+    const rawPhone = String(phoneNumber).trim();
+    const cleanPhone = rawPhone.replace(/\D/g, '');
+    const user = await User.findOne({
+      $or: [
+        { phoneNumber: rawPhone },
+        { phoneNumber: { $regex: cleanPhone.slice(-10) } },
+      ],
+    });
+    if (!user) throw new ApiError(404, `User with phone ${phoneNumber} not found`);
+    userId = user._id.toString();
+  }
+
+  if (!userId) {
+    throw new ApiError(400, 'userId or phoneNumber is required');
   }
 
   const payloadData: Record<string, string> = {
     ...(data || {}),
     ...(imageUrl ? { imageUrl } : {}),
+    type,
     sentBy: 'ADMIN',
     timestamp: new Date().toISOString(),
   };
@@ -1054,3 +1233,256 @@ export const sendUserNotification = asyncHandler(async (req: Request, res: Respo
   }));
 });
 
+/**
+ * @route   DELETE /api/v1/admin/notifications/broadcasts/:id
+ * @desc    Delete a broadcast history record
+ * @access  Protected (Admin / Super Admin)
+ */
+export const deleteBroadcast = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+
+  const broadcast = await Broadcast.findByIdAndDelete(id);
+  if (!broadcast) {
+    throw new ApiError(404, 'Broadcast record not found');
+  }
+
+  res.status(200).json(new ApiResponse(200, 'Broadcast record deleted successfully', null));
+});
+
+// ==========================================
+// ADMIN MANAGEMENT (Super Admin Only)
+// ==========================================
+
+
+/**
+ * @route   GET /api/v1/admin/admins
+ * @desc    List all admin accounts
+ * @access  Protected (super_admin)
+ */
+export const listAdmins = asyncHandler(async (req: Request, res: Response) => {
+  const admins = await Admin.find()
+    .select('-passwordHash')
+    .sort({ createdAt: -1 });
+  res.status(200).json(new ApiResponse(200, 'Admins fetched', { admins }));
+});
+
+/**
+ * @route   POST /api/v1/admin/admins
+ * @desc    Create a new admin account
+ * @access  Protected (super_admin)
+ */
+export const createAdmin = asyncHandler(async (req: Request, res: Response) => {
+  const { email, password, name, role, phone } = req.body;
+
+  if (!email || !password || !name) {
+    throw new ApiError(400, 'Email, password, and name are required');
+  }
+
+  const existingAdmin = await Admin.findOne({ email: email.trim().toLowerCase() });
+  if (existingAdmin) {
+    throw new ApiError(409, 'Admin with this email already exists');
+  }
+
+  const passwordHash = await bcrypt.hash(password, 12);
+
+  const admin = await Admin.create({
+    email: email.trim().toLowerCase(),
+    passwordHash,
+    name: name.trim(),
+    role: role || 'admin',
+    phone: phone?.trim(),
+    isActive: true,
+  });
+
+  const adminResponse = admin.toObject();
+  delete (adminResponse as any).passwordHash;
+
+  res.status(201).json(new ApiResponse(201, 'Admin created successfully', adminResponse));
+});
+
+/**
+ * @route   PUT /api/v1/admin/admins/:id
+ * @desc    Update admin details
+ * @access  Protected (super_admin)
+ */
+export const updateAdmin = asyncHandler(async (req: Request, res: Response) => {
+  const { name, email, phone, role, password } = req.body;
+  const adminId = req.params.id;
+
+  const admin = await Admin.findById(adminId);
+  if (!admin) throw new ApiError(404, 'Admin not found');
+
+  if (name) admin.name = name.trim();
+  if (email) admin.email = email.trim().toLowerCase();
+  if (phone !== undefined) admin.phone = phone?.trim();
+  if (role) admin.role = role;
+  if (password) {
+    admin.passwordHash = await bcrypt.hash(password, 12);
+  }
+
+  await admin.save();
+
+  const adminResponse = admin.toObject();
+  delete (adminResponse as any).passwordHash;
+
+  res.status(200).json(new ApiResponse(200, 'Admin updated successfully', adminResponse));
+});
+
+/**
+ * @route   PUT /api/v1/admin/admins/:id/toggle
+ * @desc    Toggle admin active status
+ * @access  Protected (super_admin)
+ */
+export const toggleAdmin = asyncHandler(async (req: Request, res: Response) => {
+  const admin = await Admin.findById(req.params.id);
+  if (!admin) throw new ApiError(404, 'Admin not found');
+
+  // Prevent deactivating yourself
+  if (admin._id.toString() === (req as any).user?._id?.toString()) {
+    throw new ApiError(400, 'You cannot deactivate your own account');
+  }
+
+  admin.isActive = !admin.isActive;
+  await admin.save();
+
+  const adminResponse = admin.toObject();
+  delete (adminResponse as any).passwordHash;
+
+  res.status(200).json(new ApiResponse(200, `Admin ${admin.isActive ? 'activated' : 'deactivated'}`, adminResponse));
+});
+
+/**
+ * @route   DELETE /api/v1/admin/admins/:id
+ * @desc    Delete an admin account
+ * @access  Protected (super_admin)
+ */
+export const deleteAdmin = asyncHandler(async (req: Request, res: Response) => {
+  const admin = await Admin.findById(req.params.id);
+  if (!admin) throw new ApiError(404, 'Admin not found');
+
+  if (admin._id.toString() === (req as any).user?._id?.toString()) {
+    throw new ApiError(400, 'You cannot delete your own account');
+  }
+
+  await Admin.findByIdAndDelete(req.params.id);
+  res.status(200).json(new ApiResponse(200, 'Admin deleted successfully', null));
+});
+
+
+// ==========================================
+// SUPPORT TICKET MANAGEMENT (Admin)
+// ==========================================
+
+
+/**
+ * @route   GET /api/v1/admin/support/tickets
+ * @desc    Get all support tickets (paginated, filterable)
+ * @access  Protected (admin)
+ */
+export const getAdminSupportTickets = asyncHandler(async (req: Request, res: Response) => {
+  const { status, priority, category, search } = req.query;
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 15;
+  const skip = (page - 1) * limit;
+
+  const filter: any = {};
+  if (status && status !== 'all') filter.status = status;
+  if (priority && priority !== 'all') filter.priority = priority;
+  if (category && category !== 'all') filter.category = category;
+
+  if (search) {
+    filter.$or = [
+      { subject: { $regex: search, $options: 'i' } },
+      { ticketNumber: { $regex: search, $options: 'i' } },
+    ];
+  }
+
+  const [tickets, total] = await Promise.all([
+    SupportTicket.find(filter)
+      .populate('passenger', 'name phoneNumber')
+      .populate('ride', '_id status')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit),
+    SupportTicket.countDocuments(filter),
+  ]);
+
+  // Counts by status for badges
+  const [openCount, inProgressCount, resolvedCount, closedCount] = await Promise.all([
+    SupportTicket.countDocuments({ status: 'OPEN' }),
+    SupportTicket.countDocuments({ status: 'IN_PROGRESS' }),
+    SupportTicket.countDocuments({ status: 'RESOLVED' }),
+    SupportTicket.countDocuments({ status: 'CLOSED' }),
+  ]);
+
+  res.status(200).json(new ApiResponse(200, 'Support tickets fetched', {
+    tickets, page, limit, total, totalPages: Math.ceil(total / limit),
+    counts: { open: openCount, inProgress: inProgressCount, resolved: resolvedCount, closed: closedCount },
+  }));
+});
+
+/**
+ * @route   GET /api/v1/admin/support/tickets/:id
+ * @desc    Get support ticket details with chat thread
+ * @access  Protected (admin)
+ */
+export const getAdminSupportTicketById = asyncHandler(async (req: Request, res: Response) => {
+  const ticket = await SupportTicket.findById(req.params.id)
+    .populate('passenger', 'name phoneNumber email')
+    .populate('ride', '_id status pickup drop finalFare');
+
+  if (!ticket) throw new ApiError(404, 'Support ticket not found');
+  res.status(200).json(new ApiResponse(200, 'Support ticket details fetched', ticket));
+});
+
+/**
+ * @route   POST /api/v1/admin/support/tickets/:id/reply
+ * @desc    Admin replies to a support ticket
+ * @access  Protected (admin)
+ */
+export const replySupportTicket = asyncHandler(async (req: Request, res: Response) => {
+  const { message } = req.body;
+  if (!message?.trim()) throw new ApiError(400, 'Message is required');
+
+  const ticket = await SupportTicket.findById(req.params.id);
+  if (!ticket) throw new ApiError(404, 'Support ticket not found');
+
+  ticket.messages.push({
+    sender: 'support_agent',
+    senderUser: (req as any).user?._id,
+    message: message.trim(),
+    createdAt: new Date(),
+  });
+
+  if (ticket.status === 'OPEN') {
+    ticket.status = 'IN_PROGRESS';
+  }
+
+  await ticket.save();
+  res.status(200).json(new ApiResponse(200, 'Reply sent', ticket));
+});
+
+/**
+ * @route   PUT /api/v1/admin/support/tickets/:id/status
+ * @desc    Update support ticket status
+ * @access  Protected (admin)
+ */
+export const updateSupportTicketStatus = asyncHandler(async (req: Request, res: Response) => {
+  const { status, resolutionSummary } = req.body;
+
+  if (!['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'].includes(status)) {
+    throw new ApiError(400, 'Invalid status');
+  }
+
+  const updateData: any = { status };
+  if (status === 'RESOLVED' || status === 'CLOSED') {
+    updateData.resolvedAt = new Date();
+    if (resolutionSummary) updateData.resolutionSummary = resolutionSummary;
+  }
+
+  const ticket = await SupportTicket.findByIdAndUpdate(req.params.id, updateData, { new: true })
+    .populate('passenger', 'name phoneNumber');
+
+  if (!ticket) throw new ApiError(404, 'Support ticket not found');
+  res.status(200).json(new ApiResponse(200, `Ticket ${status.toLowerCase()}`, ticket));
+});

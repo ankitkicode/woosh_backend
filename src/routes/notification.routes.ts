@@ -7,14 +7,30 @@ import {
   markAllNotificationsAsRead,
   deleteNotification,
   clearAllNotifications,
+  broadcastNotification,
+  getBroadcastHistory,
+  sendUserNotification,
+  getAdminAllNotifications,
+  deleteBroadcast,
 } from '../controllers/notification.controller';
 
 const router = Router();
 
-// All notification routes are protected (both passenger and rider use their Bearer token)
 router.use(protect);
 
-router.get('/',  getNotifications);
+// ==========================================
+// BROADCAST & ADMIN PUSH (FULL ACCESS)
+// ==========================================
+router.post('/broadcast', broadcastNotification);
+router.get('/broadcasts', getBroadcastHistory);
+router.delete('/broadcasts/:id', deleteBroadcast);
+router.post('/send-user', sendUserNotification);
+router.get('/all', getAdminAllNotifications);
+
+// ==========================================
+// USER NOTIFICATION INBOX
+// ==========================================
+router.get('/', getNotifications);
 router.get('/unread-count', getUnreadNotificationCount);
 router.put('/read-all', markAllNotificationsAsRead);
 router.put('/:id/read', markNotificationAsRead);

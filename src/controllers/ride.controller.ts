@@ -12,7 +12,7 @@ import { calculateFare } from '../utils/fareCalculator';
 import { mapsService } from '../services/maps.service';
 
 import { whatsappService } from '../services/whatsapp.service';
-import { DisputeCategory, PaymentMethod, PaymentStatus, RideStatus, UserRole, WalletTransactionType, CancellationBy, RIDER_SEARCH_RADIUS_KM } from '../config/constants';
+import { DisputeCategory, PaymentMethod, PaymentStatus, RideStatus, UserRole, WalletTransactionType, CancellationBy, RIDER_SEARCH_RADIUS_KM, VehicleType } from '../config/constants';
 import { WalletTransaction } from '../models/WalletTransaction';
 import { SystemConfig } from '../models/SystemConfig';
 import { paymentService } from '../services/payment.service';
@@ -56,7 +56,7 @@ export const estimateFare = asyncHandler(async (req: Request, res: Response) => 
  * @access  Protected (passenger)
  */
 export const requestRide = asyncHandler(async (req: Request, res: Response) => {
-  const { pickup, drop, paymentMethod, childProfileId, city, applyWallet } = req.body;
+  const { pickup, drop, paymentMethod, childProfileId, city, applyWallet, vehicleType = VehicleType.SCOOTER } = req.body;
   const { distanceKm, durationMins } = await mapsService.getDistanceAndDuration(
     pickup.latitude, pickup.longitude, drop.latitude, drop.longitude
   );
@@ -119,7 +119,7 @@ export const requestRide = asyncHandler(async (req: Request, res: Response) => {
 
   // Find nearby online riders for assignment
   try {
-    const nearbyRiders = await RiderProfile.find({
+    const riderFilter: any = {
       isOnline: true,
       kycStatus: 'approved',
       currentLocation: {
@@ -128,7 +128,15 @@ export const requestRide = asyncHandler(async (req: Request, res: Response) => {
           $maxDistance: RIDER_SEARCH_RADIUS_KM * 1000,
         },
       },
-    } as unknown as Record<string, unknown>).populate('user', '_id sessions').limit(10);
+    };
+
+    if (vehicleType === VehicleType.SCOOTER) {
+      riderFilter.$or = [{ vehicleType: VehicleType.SCOOTER }, { vehicleType: { $exists: false } }];
+    } else if (vehicleType) {
+      riderFilter.vehicleType = vehicleType;
+    }
+
+    const nearbyRiders = await RiderProfile.find(riderFilter).populate('user', '_id sessions').limit(10);
 
     if (nearbyRiders.length > 0) {
       const firstRider = nearbyRiders[0];
@@ -146,6 +154,7 @@ export const requestRide = asyncHandler(async (req: Request, res: Response) => {
     passenger: req.user?._id,
     pickup,
     drop,
+    vehicleType: vehicleType || VehicleType.SCOOTER,
     paymentMethod: finalPaymentMethod,
     paymentStatus: initialPaymentStatus,
     applyWallet: Boolean(applyWallet),

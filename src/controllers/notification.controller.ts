@@ -3,10 +3,14 @@ import { asyncHandler } from '../utils/asyncHandler';
 import { ApiResponse } from '../utils/ApiResponse';
 import { ApiError } from '../utils/ApiError';
 import { Notification } from '../models/Notification';
+import { Broadcast } from '../models/Broadcast';
+import { User } from '../models/User';
+import { Admin } from '../models/Admin';
+import { fcmService } from '../services/fcm.service';
 
 /**
  * @route   GET /api/v1/notifications
- * @desc    Get notification history for current logged in user (Rider or Passenger)
+ * @desc    Get notification history for current logged in user (Rider, Passenger, or Admin)
  * @access  Protected
  */
 export const getNotifications = asyncHandler(async (req: Request, res: Response) => {
@@ -124,3 +128,224 @@ export const clearAllNotifications = asyncHandler(async (req: Request, res: Resp
     new ApiResponse(200, 'All notifications cleared', null)
   );
 });
+
+// =========================================================================
+// ADMIN & SUPER ADMIN BROADCAST & PUSH MANAGEMENT (FULL ACCESS)
+// =========================================================================
+
+/**
+ * @route   POST /api/v1/notifications/broadcast
+ * @route   POST /api/v1/admin/notifications/broadcast
+ * @desc    Send push broadcast to ALL, PASSENGERS, or RIDERS with city & platform targeting
+ * @access  Protected (Admin, Super Admin)
+ */
+export const broadcastNotification = asyncHandler(async (req: Request, res: Response) => {
+  const target = req.body.target || 'ALL';
+  const title = (req.body.title || req.body.heading || req.body.subject || '').trim();
+  const body = (req.body.body || req.body.message || req.body.content || req.body.text || '').trim();
+  const { city, platform, type = 'ANNOUNCEMENT', imageUrl, data } = req.body;
+
+  if (!title || !body) {
+    throw new ApiError(400, 'Notification Title and Body are required');
+  }
+
+  // Fetch admin name for audit log
+  let adminName = 'Admin';
+  try {
+    const admin = await Admin.findById(req.user?._id);
+    if (admin) adminName = admin.name;
+  } catch (e) {
+    // quiet
+  }
+
+  const payloadData: Record<string, string> = {
+    ...(data || {}),
+    ...(imageUrl ? { imageUrl } : {}),
+    type,
+    sentBy: adminName,
+    timestamp: new Date().toISOString(),
+  };
+
+  // 1. Deliver via FCM service
+  const result = await fcmService.broadcastNotification(
+    target,
+    title.trim(),
+    body.trim(),
+    city,
+    payloadData,
+    platform
+  );
+
+  // 2. Save Broadcast history record
+  const broadcastLog = await Broadcast.create({
+    title: title.trim(),
+    body: body.trim(),
+    target,
+    city: city || 'ALL_CITIES',
+    platform: platform || 'ALL',
+    type,
+    imageUrl,
+    data: payloadData,
+    sentBy: req.user?._id,
+    sentByName: adminName,
+    sentCount: result.sentCount,
+  });
+
+  res.status(200).json(
+    new ApiResponse(200, `Broadcast sent successfully to ${result.sentCount} active devices`, {
+      broadcast: broadcastLog,
+      target,
+      city: city || 'ALL_CITIES',
+      sentDevicesCount: result.sentCount,
+    })
+  );
+});
+
+/**
+ * @route   GET /api/v1/notifications/broadcasts
+ * @route   GET /api/v1/admin/notifications/broadcasts
+ * @desc    Get sent broadcast notifications history (paginated)
+ * @access  Protected (Admin, Super Admin)
+ */
+export const getBroadcastHistory = asyncHandler(async (req: Request, res: Response) => {
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 20;
+  const skip = (page - 1) * limit;
+
+  const [broadcasts, total] = await Promise.all([
+    Broadcast.find()
+      .populate('sentBy', 'name email role')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit),
+    Broadcast.countDocuments(),
+  ]);
+
+  res.status(200).json(
+    new ApiResponse(200, 'Broadcast history fetched successfully', {
+      broadcasts,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    })
+  );
+});
+
+/**
+ * @route   POST /api/v1/notifications/send-user
+ * @route   POST /api/v1/admin/notifications/send-user
+ * @desc    Send direct push notification to specific user (by userId or phoneNumber)
+ * @access  Protected (Admin, Super Admin)
+ */
+export const sendUserNotification = asyncHandler(async (req: Request, res: Response) => {
+  let userId = req.body.userId || req.body.user || req.body.id;
+  let phoneNumber = req.body.phoneNumber || req.body.phone || req.body.mobile;
+  const title = (req.body.title || req.body.heading || req.body.subject || '').trim();
+  const body = (req.body.body || req.body.message || req.body.content || req.body.text || '').trim();
+  const { type = 'GENERAL', data, imageUrl } = req.body;
+
+  if (!title || !body) {
+    throw new ApiError(400, 'Title and message body are required');
+  }
+
+  if (!userId && phoneNumber) {
+    const rawPhone = String(phoneNumber).trim();
+    const cleanPhone = rawPhone.replace(/\D/g, '');
+    const user = await User.findOne({
+      $or: [
+        { phoneNumber: rawPhone },
+        { phoneNumber: { $regex: cleanPhone.slice(-10) } },
+      ],
+    });
+    if (!user) throw new ApiError(404, `User with phone ${phoneNumber} not found`);
+    userId = user._id.toString();
+  }
+
+  if (!userId) {
+    throw new ApiError(400, 'userId or phoneNumber is required');
+  }
+
+  const payloadData: Record<string, string> = {
+    ...(data || {}),
+    ...(imageUrl ? { imageUrl } : {}),
+    type,
+    sentBy: 'ADMIN',
+    timestamp: new Date().toISOString(),
+  };
+
+  const isSent = await fcmService.sendToUser(userId, title.trim(), body.trim(), payloadData);
+
+  res.status(200).json(
+    new ApiResponse(
+      200,
+      isSent ? 'Direct notification sent successfully' : 'Notification saved to history (User has no active FCM push devices)',
+      {
+        userId,
+        delivered: isSent,
+      }
+    )
+  );
+});
+
+/**
+ * @route   GET /api/v1/admin/notifications/all
+ * @desc    Admin view all notifications across all users (with filters)
+ * @access  Protected (Admin, Super Admin)
+ */
+export const getAdminAllNotifications = asyncHandler(async (req: Request, res: Response) => {
+  const { type, isRead, search } = req.query;
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 20;
+  const skip = (page - 1) * limit;
+
+  const filter: any = {};
+  if (type) filter.type = type;
+  if (isRead !== undefined && isRead !== 'all') filter.isRead = isRead === 'true';
+
+  if (search) {
+    filter.$or = [
+      { title: { $regex: search as string, $options: 'i' } },
+      { body: { $regex: search as string, $options: 'i' } },
+    ];
+  }
+
+  const [notifications, total] = await Promise.all([
+    Notification.find(filter)
+      .populate('user', 'name phoneNumber role')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit),
+    Notification.countDocuments(filter),
+  ]);
+
+  res.status(200).json(
+    new ApiResponse(200, 'All notifications fetched', {
+      notifications,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    })
+  );
+});
+
+/**
+ * @route   DELETE /api/v1/notifications/broadcasts/:id
+ * @route   DELETE /api/v1/admin/notifications/broadcasts/:id
+ * @desc    Delete a broadcast history record
+ * @access  Protected (Admin, Super Admin)
+ */
+export const deleteBroadcast = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+
+  const broadcast = await Broadcast.findByIdAndDelete(id);
+  if (!broadcast) {
+    throw new ApiError(404, 'Broadcast record not found');
+  }
+
+  res.status(200).json(
+    new ApiResponse(200, 'Broadcast record deleted successfully', null)
+  );
+});
+

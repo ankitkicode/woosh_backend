@@ -50,6 +50,13 @@ export enum CancellationBy {
   SYSTEM = 'system',
 }
 
+export enum VehicleType {
+  SCOOTER = 'scooter',
+  BIKE = 'bike',
+  AUTO = 'auto',
+  CAB = 'cab',
+}
+
 export enum PaymentMethod {
   CASH = 'cash',
   UPI = 'upi',

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { VehicleType } from '../config/constants';
 
 export const updateRiderProfileSchema = z.object({
   name: z.string().trim().min(2).max(50).optional(),
@@ -10,6 +11,7 @@ export const updateRiderProfileSchema = z.object({
   vehicleNumber: z.string().trim().toUpperCase().min(4).max(15).optional(),
   vehicleModel: z.string().trim().max(50).optional(),
   vehicleColor: z.string().trim().max(30).optional(),
+  vehicleType: z.nativeEnum(VehicleType).optional(),
   emergencyContacts: z.any().optional(),
 });
 

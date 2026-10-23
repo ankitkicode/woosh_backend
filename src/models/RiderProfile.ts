@@ -1,5 +1,5 @@
 import mongoose, { Document, Schema } from 'mongoose';
-import { KYCStatus, DocumentType } from '../config/constants';
+import { KYCStatus, DocumentType, VehicleType } from '../config/constants';
 
 interface IDocument {
   type: DocumentType;
@@ -43,6 +43,7 @@ export interface IRiderProfile extends Document {
   vehicleNumber: string;
   vehicleModel?: string;
   vehicleColor?: string;
+  vehicleType?: VehicleType;
   areas?: string[];
   kycStatus: KYCStatus;
   kycRejectionReason?: string;
@@ -72,6 +73,7 @@ const riderProfileSchema = new Schema<IRiderProfile>(
     vehicleNumber: { type: String, required: true, trim: true, uppercase: true },
     vehicleModel: { type: String, trim: true },
     vehicleColor: { type: String, trim: true },
+    vehicleType: { type: String, enum: Object.values(VehicleType), default: VehicleType.SCOOTER, index: true },
     areas: [{ type: String, trim: true }],
     kycStatus: { type: String, enum: Object.values(KYCStatus), default: KYCStatus.PENDING },
     kycRejectionReason: { type: String },
