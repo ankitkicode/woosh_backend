@@ -12,7 +12,7 @@ import { RiderProfile } from '../models/RiderProfile';
 import { WalletTransaction } from '../models/WalletTransaction';
 import { SOSAlert } from '../models/SOSAlert';
 import { InsuranceClaim } from '../models/InsuranceClaim';
-import { KYCStatus, RideStatus, ComplaintStatus, PaymentStatus, WalletTransactionType, UserRole, CancellationBy } from '../config/constants';
+import { KYCStatus, RideStatus, ComplaintStatus, PaymentStatus, WalletTransactionType, UserRole, CancellationBy, DocumentType } from '../config/constants';
 import { ChildProfile } from '../models/ChildProfile';
 import { Admin } from '../models/Admin';
 import { generateAccessToken, generateRefreshToken } from '../utils/generateToken';
@@ -390,6 +390,227 @@ export const deleteRider = asyncHandler(async (req: Request, res: Response) => {
   await RiderProfile.findByIdAndDelete(profile._id);
 
   res.status(200).json(new ApiResponse(200, 'Rider deleted successfully', null));
+});
+
+/**
+ * @route   PUT /api/v1/admin/riders/:id/profile
+ * @desc    Admin update rider profile (User details + RiderProfile details)
+ * @access  Protected (admin)
+ */
+export const updateRiderProfileByAdmin = asyncHandler(async (req: Request, res: Response) => {
+  const riderId = req.params.id as string;
+  let profile = await RiderProfile.findById(riderId);
+  if (!profile && mongoose.Types.ObjectId.isValid(riderId)) {
+    profile = await RiderProfile.findOne({ user: riderId });
+  }
+  if (!profile) throw new ApiError(404, 'Rider profile not found');
+
+  const {
+    name,
+    email,
+    phoneNumber,
+    dateOfBirth,
+    city,
+    state,
+    isActive,
+    vehicleNumber,
+    vehicleModel,
+    vehicleColor,
+    vehicleType,
+    areas,
+    canAcceptChildRides,
+    walletBalance,
+    preferences,
+    safetyPreferences,
+  } = req.body;
+
+  // 1. Update User fields (Note: Woosh riders are strictly female)
+  const userUpdates: any = { gender: 'female' };
+  if (name !== undefined) userUpdates.name = name.trim();
+  if (email !== undefined) userUpdates.email = email.trim();
+  if (phoneNumber !== undefined) userUpdates.phoneNumber = phoneNumber.trim();
+  if (dateOfBirth !== undefined) userUpdates.dateOfBirth = dateOfBirth.trim();
+  if (city !== undefined) userUpdates.city = city.trim();
+  if (state !== undefined) userUpdates.state = state.trim();
+  if (isActive !== undefined) userUpdates.isActive = Boolean(isActive);
+
+  const user = await User.findByIdAndUpdate(
+    profile.user,
+    { $set: userUpdates },
+    { new: true, runValidators: true }
+  ).select('-refreshToken');
+
+  // 2. Parse areas if passed as comma-separated string
+  let parsedAreas = areas;
+  if (typeof areas === 'string') {
+    parsedAreas = areas.split(',').map((a: string) => a.trim()).filter((a: string) => a.length > 0);
+  }
+
+  // 3. Update RiderProfile fields
+  if (vehicleNumber !== undefined) profile.vehicleNumber = vehicleNumber.trim().toUpperCase();
+  if (vehicleModel !== undefined) profile.vehicleModel = vehicleModel.trim();
+  if (vehicleColor !== undefined) profile.vehicleColor = vehicleColor.trim();
+  if (vehicleType !== undefined) profile.vehicleType = vehicleType;
+  if (parsedAreas !== undefined) profile.areas = parsedAreas;
+  if (canAcceptChildRides !== undefined) profile.canAcceptChildRides = Boolean(canAcceptChildRides);
+  if (walletBalance !== undefined && !isNaN(Number(walletBalance))) {
+    profile.walletBalance = Number(walletBalance);
+  }
+
+  // 4. Update Driver Preferences
+  if (preferences && typeof preferences === 'object') {
+    if (!profile.preferences) {
+      profile.preferences = {
+        maxPickupDistance: 3,
+        acceptCashRides: true,
+        rideRequestSound: true,
+        language: 'English',
+        payoutSchedule: 'WEEKLY'
+      };
+    }
+    if (preferences.maxPickupDistance !== undefined) profile.preferences.maxPickupDistance = Number(preferences.maxPickupDistance);
+    if (preferences.acceptCashRides !== undefined) profile.preferences.acceptCashRides = Boolean(preferences.acceptCashRides);
+    if (preferences.rideRequestSound !== undefined) profile.preferences.rideRequestSound = Boolean(preferences.rideRequestSound);
+    if (preferences.language !== undefined) profile.preferences.language = preferences.language;
+    if (preferences.payoutSchedule !== undefined) profile.preferences.payoutSchedule = preferences.payoutSchedule;
+  }
+
+  // 5. Update Safety Preferences
+  if (safetyPreferences && typeof safetyPreferences === 'object') {
+    if (!profile.safetyPreferences) {
+      profile.safetyPreferences = {
+        shareEveryTrip: false,
+        stopRequestsAfter10PM: false,
+        rideCheck: true,
+        recordAudioOnSOS: false
+      };
+    }
+    if (safetyPreferences.shareEveryTrip !== undefined) profile.safetyPreferences.shareEveryTrip = Boolean(safetyPreferences.shareEveryTrip);
+    if (safetyPreferences.stopRequestsAfter10PM !== undefined) profile.safetyPreferences.stopRequestsAfter10PM = Boolean(safetyPreferences.stopRequestsAfter10PM);
+    if (safetyPreferences.rideCheck !== undefined) profile.safetyPreferences.rideCheck = Boolean(safetyPreferences.rideCheck);
+    if (safetyPreferences.recordAudioOnSOS !== undefined) profile.safetyPreferences.recordAudioOnSOS = Boolean(safetyPreferences.recordAudioOnSOS);
+  }
+
+  await profile.save();
+
+  res.status(200).json(new ApiResponse(200, 'Rider profile updated successfully', { user, profile }));
+});
+
+/**
+ * @route   POST /api/v1/admin/riders/:id/documents/:docType
+ * @desc    Admin upload or replace a KYC document for a rider
+ * @access  Protected (admin)
+ */
+export const uploadRiderDocumentByAdmin = asyncHandler(async (req: Request, res: Response) => {
+  const riderId = req.params.id as string;
+  const docType = req.params.docType as string;
+
+  let file: Express.Multer.File | undefined = req.file;
+  const anyFiles = req.files as Express.Multer.File[] | { [key: string]: Express.Multer.File[] } | undefined;
+  if (!file && anyFiles) {
+    if (Array.isArray(anyFiles) && anyFiles.length > 0) {
+      file = anyFiles[0];
+    } else if (typeof anyFiles === 'object') {
+      const matchKey = Object.keys(anyFiles).find(k => k === docType || k === 'file' || k === 'document');
+      if (matchKey && (anyFiles as any)[matchKey]?.[0]) {
+        file = (anyFiles as any)[matchKey][0];
+      } else {
+        const firstKey = Object.keys(anyFiles)[0];
+        if (firstKey && (anyFiles as any)[firstKey]?.[0]) {
+          file = (anyFiles as any)[firstKey][0];
+        }
+      }
+    }
+  }
+
+  if (!file) {
+    throw new ApiError(400, 'Document file is required');
+  }
+
+  const validDocTypes = Object.values(DocumentType);
+  if (!validDocTypes.includes(docType as DocumentType)) {
+    throw new ApiError(400, `Invalid document type '${docType}'. Allowed types: ${validDocTypes.join(', ')}`);
+  }
+
+  let profile = await RiderProfile.findById(riderId);
+  if (!profile && mongoose.Types.ObjectId.isValid(riderId)) {
+    profile = await RiderProfile.findOne({ user: riderId });
+  }
+  if (!profile) throw new ApiError(404, 'Rider profile not found');
+
+  const fileUrl = `/uploads/${file.filename}`;
+  const status = (req.body.status || 'APPROVED').toUpperCase() as 'APPROVED' | 'PENDING' | 'REJECTED';
+
+  const docIndex = profile.documents.findIndex(d => d.type === docType);
+  const updatedDoc = {
+    type: docType as DocumentType,
+    url: fileUrl,
+    status,
+    rejectionReason: status === 'REJECTED' ? (req.body.reason || 'Rejected by Admin') : undefined,
+  };
+
+  if (docIndex >= 0) {
+    profile.documents[docIndex] = updatedDoc;
+  } else {
+    profile.documents.push(updatedDoc);
+  }
+
+  // If status is APPROVED, check if overall KYC can be approved
+  if (status === 'APPROVED') {
+    const allApproved = profile.documents.length > 0 && profile.documents.every(d => d.status === 'APPROVED');
+    if (allApproved) {
+      profile.kycStatus = KYCStatus.APPROVED;
+      profile.kycRejectionReason = undefined;
+
+      const user = await User.findById(profile.user);
+      if (user) {
+        user.isActive = true;
+        if (user.role === UserRole.PASSENGER) user.role = UserRole.BOTH;
+        await user.save();
+      }
+    }
+  }
+
+  await profile.save();
+
+  res.status(200).json(new ApiResponse(200, `Document '${docType}' uploaded successfully`, {
+    document: updatedDoc,
+    documents: profile.documents,
+    kycStatus: profile.kycStatus
+  }));
+});
+
+/**
+ * @route   POST /api/v1/admin/riders/:id/profile-image
+ * @desc    Admin upload or replace rider profile image
+ * @access  Protected (admin)
+ */
+export const uploadRiderAvatarByAdmin = asyncHandler(async (req: Request, res: Response) => {
+  const riderId = req.params.id as string;
+  let file: Express.Multer.File | undefined = req.file;
+  const anyFiles = req.files as Express.Multer.File[] | { [key: string]: Express.Multer.File[] } | undefined;
+  if (!file && anyFiles) {
+    if (Array.isArray(anyFiles) && anyFiles.length > 0) file = anyFiles[0];
+    else if (typeof anyFiles === 'object') {
+      const firstKey = Object.keys(anyFiles)[0];
+      if (firstKey && (anyFiles as any)[firstKey]?.[0]) file = (anyFiles as any)[firstKey][0];
+    }
+  }
+
+  if (!file) throw new ApiError(400, 'Please upload an image file');
+
+  let profile = await RiderProfile.findById(riderId);
+  if (!profile && mongoose.Types.ObjectId.isValid(riderId)) {
+    profile = await RiderProfile.findOne({ user: riderId });
+  }
+  if (!profile) throw new ApiError(404, 'Rider profile not found');
+
+  profile.profileImage = `/uploads/${file.filename}`;
+  await profile.save();
+
+  res.status(200).json(new ApiResponse(200, 'Profile image updated successfully', {
+    profileImage: profile.profileImage
+  }));
 });
 
 /**

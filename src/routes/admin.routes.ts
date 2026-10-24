@@ -4,7 +4,7 @@ import { authorize } from '../middlewares/role.middleware';
 import { UserRole } from '../config/constants';
 import {
   getDashboard, getPendingRiders, approveRider, rejectRider, updateDocumentStatus,
-  getAllRiders, getRiderById, deleteRider,
+  getAllRiders, getRiderById, deleteRider, updateRiderProfileByAdmin, uploadRiderDocumentByAdmin, uploadRiderAvatarByAdmin,
   getActiveRides, getAllRides, getRideById, cancelRideByAdmin,
   getDisputes, resolveDispute, getDisputeById,
   getUsers, getSOSAlerts, getInsuranceClaims,
@@ -35,6 +35,7 @@ import { getCities, createCity, updateCity, toggleCityStatus, getCityById, delet
 import { getGateways, createGateway, updateGateway, toggleGatewayStatus } from '../controllers/gateway.controller';
 import { getSettings, updateSettings } from '../controllers/settings.controller';
 import { toggleOnlineStatus } from '../controllers/rider.controller';
+import { upload } from '../middlewares/upload.middleware';
 
 const router = Router();
 
@@ -58,11 +59,16 @@ router.put('/rides/:id/cancel', cancelRideByAdmin);
 router.get('/riders', getAllRiders);
 router.get('/riders/pending', getPendingRiders);
 router.get('/riders/:id', getRiderById);
+router.put('/riders/:id', updateRiderProfileByAdmin);
+router.put('/riders/:id/profile', updateRiderProfileByAdmin);
 router.delete('/riders/:id', deleteRider);
 router.put('/riders/:id/approve', approveRider);
 router.put('/riders/:id/reject', rejectRider);
 router.put('/riders/:id/status', toggleOnlineStatus);
 router.put('/riders/:id/documents/:docType/status', updateDocumentStatus);
+router.post('/riders/:id/documents/:docType', upload.any(), uploadRiderDocumentByAdmin);
+router.put('/riders/:id/documents/:docType', upload.any(), uploadRiderDocumentByAdmin);
+router.post('/riders/:id/profile-image', upload.any(), uploadRiderAvatarByAdmin);
 
 // Disputes
 router.get('/disputes', getDisputes);
