@@ -297,7 +297,8 @@ export const getNearbyRiders = asyncHandler(async (req: Request, res: Response) 
 
   const riders = await RiderProfile.find(riderFilter).populate('user', 'name phoneNumber').limit(10);
 
-  res.status(200).json(new ApiResponse(200, 'Nearby riders fetched', riders));
+  const message = riders.length > 0 ? 'Nearby riders fetched' : 'No riders available nearby at the moment';
+  res.status(200).json(new ApiResponse(200, message, riders));
 });
 
 /**
@@ -399,6 +400,7 @@ export const rejectRide = asyncHandler(async (req: Request, res: Response) => {
  * @desc    Rider marks as arrived at pickup
  * @access  Protected (rider)
  */
+
 export const riderArrived = asyncHandler(async (req: Request, res: Response) => {
   const ride = await Ride.findOne({ _id: req.params.id, rider: req.user?._id, status: RideStatus.ACCEPTED }).populate('passenger');
   if (!ride) throw new ApiError(404, 'Ride not found');
