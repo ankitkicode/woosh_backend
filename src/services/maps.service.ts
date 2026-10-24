@@ -1,4 +1,4 @@
-import { Client } from '@googlemaps/google-maps-services-js';
+import { Client, TravelMode } from '@googlemaps/google-maps-services-js';
 import 'dotenv/config';
 
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || '';
@@ -6,7 +6,7 @@ const mapsClient = new Client({});
 
 export const mapsService = {
   /**
-   * Get distance and duration between two coordinates
+   * Get distance and duration between two coordinates (real-time traffic aware)
    */
   async getDistanceAndDuration(originLat: number, originLng: number, destLat: number, destLng: number) {
     const apiKey = process.env.GOOGLE_MAPS_API_KEY || '';
@@ -19,15 +19,20 @@ export const mapsService = {
         params: {
           origins: [{ lat: originLat, lng: originLng }],
           destinations: [{ lat: destLat, lng: destLng }],
+          mode: TravelMode.driving,
+          departure_time: 'now' as any, // Real-time traffic-based ETA
           key: apiKey,
         },
       });
 
       const element = response.data.rows[0].elements[0];
       if (element.status === 'OK') {
+        // Prefer duration_in_traffic (real-time) over static duration
+        const trafficDuration = (element as any).duration_in_traffic;
+        const durationSeconds = trafficDuration ? trafficDuration.value : element.duration.value;
         return {
           distanceKm: element.distance.value / 1000,
-          durationMins: Math.ceil(element.duration.value / 60),
+          durationMins: Math.ceil(durationSeconds / 60),
         };
       } else if (element.status === 'ZERO_RESULTS') {
         // Fallback for unreachable destinations (e.g., emulator in USA, destination in India)

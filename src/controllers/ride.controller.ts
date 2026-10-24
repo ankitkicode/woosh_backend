@@ -47,7 +47,40 @@ export const estimateFare = asyncHandler(async (req: Request, res: Response) => 
   }
 
   const fare = calculateFare({ distanceKm, durationMinutes: durationMins, ...pricingOverrides });
-  res.status(200).json(new ApiResponse(200, 'Fare estimated', { distanceKm, durationMinutes: durationMins, fare }));
+
+  // Estimate nearest rider ETA and distance to pickup (optional, does not affect existing logic)
+  let riderPickupEstimate: any = null;
+  try {
+    const riderFilter = {
+      isOnline: true,
+      kycStatus: 'approved',
+      currentLocation: {
+        $near: {
+          $geometry: { type: 'Point', coordinates: [pickup.longitude, pickup.latitude] },
+          $maxDistance: RIDER_SEARCH_RADIUS_KM * 1000,
+        },
+      },
+    };
+    const nearbyRider = await RiderProfile.findOne(riderFilter as any);
+    if (nearbyRider?.currentLocation?.coordinates) {
+      const [rLng, rLat] = nearbyRider.currentLocation.coordinates;
+      riderPickupEstimate = await calculateEtaAndDistance(rLat, rLng, pickup.latitude, pickup.longitude);
+    }
+  } catch (err) {
+    console.error('[EstimateFare] Error calculating rider ETA:', err);
+  }
+
+  res.status(200).json(new ApiResponse(200, 'Fare estimated', {
+    distanceKm,
+    durationMinutes: durationMins,
+    fare,
+    riderPickup: riderPickupEstimate ? {
+      distanceKm: riderPickupEstimate.distanceKm,
+      etaMinutes: riderPickupEstimate.etaMinutes,
+      formattedDistance: riderPickupEstimate.formattedDistance,
+      formattedEta: riderPickupEstimate.formattedEta,
+    } : null,
+  }));
 });
 
 /**
@@ -1058,6 +1091,19 @@ export const getRideDetails = asyncHandler(async (req: Request, res: Response) =
     );
   }
 
+  // Calculate Drop Estimate (current position -> Drop point) when ride is started
+  let dropEstimate: any = null;
+  if (ride.status === RideStatus.STARTED && ride.drop?.latitude && ride.drop?.longitude) {
+    const originLat = riderLat !== undefined ? riderLat : ride.pickup.latitude;
+    const originLng = riderLng !== undefined ? riderLng : ride.pickup.longitude;
+    dropEstimate = await calculateEtaAndDistance(
+      originLat,
+      originLng,
+      ride.drop.latitude,
+      ride.drop.longitude
+    );
+  }
+
   const rideData = ride.toObject();
   const enrichedPickup = {
     ...rideData.pickup,
@@ -1070,6 +1116,7 @@ export const getRideDetails = asyncHandler(async (req: Request, res: Response) =
   res.status(200).json(new ApiResponse(200, 'Ride details fetched', {
     ...rideData,
     pickup: enrichedPickup,
+    dropEstimate,
     riderProfile: riderProfile || undefined
   }));
 });
