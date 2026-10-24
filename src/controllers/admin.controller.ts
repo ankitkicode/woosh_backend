@@ -137,9 +137,9 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
       },
     ]),
     RiderProfile.find({ isOnline: true })
-      .populate('user', 'name phoneNumber')
-      .select('user vehicleNumber vehicleModel vehicleType currentLocation isOnline totalRides')
-      .limit(10),
+      .populate('user', 'name phoneNumber city')
+      .select('user vehicleNumber vehicleModel vehicleColor vehicleType currentLocation isOnline totalRides areas')
+      .limit(50),
     Ride.find({
       status: {
         $in: [
