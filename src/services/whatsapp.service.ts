@@ -27,7 +27,7 @@ export const whatsappService = {
           type: 'template',
           template: {
             name: META_WHATSAPP_TEMPLATE_NAME,
-            language: { code: 'en' },
+            language: { code: 'en_US' },
             components: [
               {
                 type: 'body',
@@ -112,7 +112,7 @@ export const whatsappService = {
           type: 'template',
           template: {
             name: 'new_ride_request',
-            language: { code: 'en' },
+            language: { code: 'en_US' },
             components: [
               {
                 type: 'body',
@@ -148,7 +148,7 @@ export const whatsappService = {
           type: 'template',
           template: {
             name: 'ride_accepted',
-            language: { code: 'en' },
+            language: { code: 'en_US' },
             components: [
               {
                 type: 'body',
@@ -181,7 +181,7 @@ export const whatsappService = {
           type: 'template',
           template: {
             name: 'rider_arrived',
-            language: { code: 'en' },
+            language: { code: 'en_US' },
             components: [
               {
                 type: 'body',
@@ -216,7 +216,7 @@ export const whatsappService = {
           type: 'template',
           template: {
             name: 'ride_started',
-            language: { code: 'en' }
+            language: { code: 'en_US' }
           },
         },
         { headers: { Authorization: `Bearer ${META_WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' } }
@@ -243,7 +243,7 @@ export const whatsappService = {
           type: 'template',
           template: {
             name: 'ride_completed',
-            language: { code: 'en' },
+            language: { code: 'en_US' },
             components: [
               {
                 type: 'body',
@@ -278,7 +278,7 @@ export const whatsappService = {
           type: 'template',
           template: {
             name: 'welcome_rider',
-            language: { code: 'en' },
+            language: { code: 'en_US' },
             components: [
               {
                 type: 'body',
@@ -313,7 +313,7 @@ export const whatsappService = {
           type: 'template',
           template: {
             name: 'support_ticket_created',
-            language: { code: 'en' },
+            language: { code: 'en_US' },
             components: [
               {
                 type: 'body',
