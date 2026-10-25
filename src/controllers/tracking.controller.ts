@@ -391,21 +391,42 @@ export const triggerSOS = asyncHandler(async (req: Request, res: Response) => {
     status: 'active',
   });
 
-  // 5. Send SMS / WhatsApp to emergency contacts
+  // 5. Send WhatsApp SOS Alert to emergency contacts & Admin
   const user = await User.findById(req.user?._id);
+  const locationUrl = latNum && lngNum ? `https://maps.google.com/?q=${latNum},${lngNum}` : 'Location unknown';
+  const resolvedAddress = address || (latNum && lngNum ? `Lat: ${latNum.toFixed(4)}, Lng: ${lngNum.toFixed(4)}` : 'Live coordinates active');
+  const rideLabel = ride ? `#${ride._id.toString().slice(-8).toUpperCase()}` : 'N/A';
+  const alertUserName = user?.name || user?.phoneNumber || 'User';
+
+  // Send to user's emergency contacts if available
   if (user && user.emergencyContacts && user.emergencyContacts.length > 0) {
-    const locationUrl = latNum && lngNum ? `https://maps.google.com/?q=${latNum},${lngNum}` : 'Location unknown';
     for (const contact of user.emergencyContacts) {
       try {
         await whatsappService.sendSOSAlert(
           contact.phoneNumber,
-          user.name || 'Your contact',
-          locationUrl
+          alertUserName,
+          resolvedAddress,
+          locationUrl,
+          rideLabel
         );
       } catch (err) {
         console.error(`[SOS] Failed to send WhatsApp to emergency contact ${contact.phoneNumber}:`, err);
       }
     }
+  }
+
+  // Also send WhatsApp SOS Alert to Admin (9011013612)
+  const adminSOSPhone = process.env.ADMIN_SOS_PHONE || '9011013612';
+  try {
+    await whatsappService.sendSOSAlert(
+      adminSOSPhone,
+      alertUserName,
+      resolvedAddress,
+      locationUrl,
+      rideLabel
+    );
+  } catch (err) {
+    console.error(`[SOS] Failed to send WhatsApp to Admin (${adminSOSPhone}):`, err);
   }
 
   // 6. Notify admin via Socket (Both admin:room and admin_room, both events)

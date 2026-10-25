@@ -337,33 +337,57 @@ export const whatsappService = {
   /**
    * Send SOS Alert
    */
-  async sendSOSAlert(phoneNumber: string, userName: string, locationUrl: string): Promise<boolean> {
+  async sendSOSAlert(
+    phoneNumber: string,
+    userName: string,
+    address: string,
+    locationUrl: string,
+    rideId: string = 'N/A'
+  ): Promise<boolean> {
     if (!META_WHATSAPP_TOKEN || !META_PHONE_NUMBER_ID) return false;
     try {
       const cleanPhone = phoneNumber.replace(/\D/g, '');
       const formattedNumber = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
-      await axios.post(
-        `https://graph.facebook.com/v19.0/${META_PHONE_NUMBER_ID}/messages`,
-        {
-          messaging_product: 'whatsapp',
-          to: formattedNumber,
-          type: 'template',
-          template: {
-            name: 'sos_alert',
-            language: { code: 'en' },
-            components: [
-              {
-                type: 'body',
-                parameters: [
-                  { type: 'text', text: userName },
-                  { type: 'text', text: locationUrl }
-                ],
-              },
-            ],
-          },
+
+      const buildPayload = (langCode: string) => ({
+        messaging_product: 'whatsapp',
+        to: formattedNumber,
+        type: 'template',
+        template: {
+          name: 'sos_alert',
+          language: { code: langCode },
+          components: [
+            {
+              type: 'body',
+              parameters: [
+                { type: 'text', text: userName || 'User' },
+                { type: 'text', text: address || 'Live coordinates active' },
+                { type: 'text', text: locationUrl || 'Location unknown' },
+                { type: 'text', text: rideId || 'N/A' },
+              ],
+            },
+          ],
         },
-        { headers: { Authorization: `Bearer ${META_WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' } }
-      );
+      });
+
+      try {
+        await axios.post(
+          `https://graph.facebook.com/v19.0/${META_PHONE_NUMBER_ID}/messages`,
+          buildPayload('en_US'),
+          { headers: { Authorization: `Bearer ${META_WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' } }
+        );
+      } catch (err: any) {
+        // Fallback to 'en' in case template was created under 'en'
+        if (err.response?.data?.error?.code === 132001 || err.response?.data?.error?.error_subcode === 2494011 || err.response?.data?.error?.message?.includes('language')) {
+          await axios.post(
+            `https://graph.facebook.com/v19.0/${META_PHONE_NUMBER_ID}/messages`,
+            buildPayload('en'),
+            { headers: { Authorization: `Bearer ${META_WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' } }
+          );
+        } else {
+          throw err;
+        }
+      }
       return true;
     } catch (error: any) {
       console.error('Error sending WhatsApp sos_alert:', error.response?.data || error.message);
