@@ -1521,7 +1521,6 @@ export const getRideInvoice = asyncHandler(async (req: Request, res: Response) =
     invoiceDate: invoiceData.invoiceDate,
     downloadUrl: downloadApiUrl,
     directPdfUrl,
-    downloadApiUrl,
     totalFare: invoiceData.fare.totalFare,
     paymentMethod: invoiceData.fare.paymentMethod,
     paymentStatus: invoiceData.fare.paymentStatus,
