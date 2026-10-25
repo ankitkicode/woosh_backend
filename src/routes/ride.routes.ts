@@ -7,7 +7,7 @@ import {
   estimateFare, requestRide, getNearbyRiders,
   acceptRide, rejectRide, riderArrived, startRide, completeRide, cancelRide, confirmPayment,
   getRideDetails, getRideHistory, rateRide, verifyDigitalPayment, getHighDemandAreas, getActiveRide,
-  applyWalletToRide
+  applyWalletToRide, getRideInvoice, downloadRideInvoice
 } from '../controllers/ride.controller';
 import { rideEstimateSchema, requestRideSchema, cancelRideSchema, applyWalletSchema } from '../validations/ride.validation';
 
@@ -71,6 +71,7 @@ router.put('/:id/cancel', validate(cancelRideSchema),
   } */
 cancelRide);
 router.put('/:id/rate', rateRide);
-
+router.get('/:id/invoice', getRideInvoice);
+router.get('/:id/invoice/download', downloadRideInvoice);
 
 export default router;

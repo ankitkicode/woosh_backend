@@ -78,6 +78,10 @@ export interface IRide extends Document {
   assignedRider?: mongoose.Types.ObjectId;
   assignmentExpiresAt?: Date;
   
+  // Invoice
+  invoiceUrl?: string;
+  invoiceNumber?: string;
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -112,6 +116,8 @@ const rideSchema = new Schema<IRide>(
     paymentStatus: { type: String, enum: Object.values(PaymentStatus), default: PaymentStatus.PENDING },
     razorpayOrderId: { type: String },
     razorpayPaymentId: { type: String },
+    invoiceUrl: { type: String },
+    invoiceNumber: { type: String },
     isSurge: { type: Boolean, default: false },
     surgeMultiplier: { type: Number, default: 1.0 },
     cancellation: {

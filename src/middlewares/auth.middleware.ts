@@ -21,12 +21,18 @@ declare global {
  * Middleware to authenticate all protected routes via Bearer JWT.
  */
 export const protect = asyncHandler(async (req: Request, _res: Response, next: NextFunction) => {
+  let token: string | undefined;
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    throw new ApiError(401, 'Authorization header missing or malformed');
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.split(' ')[1];
+  } else if (req.query.token && typeof req.query.token === 'string') {
+    token = req.query.token;
   }
 
-  const token = authHeader.split(' ')[1];
+  if (!token) {
+    throw new ApiError(401, 'Authorization token missing or malformed');
+  }
+
   const decoded = verifyAccessToken(token);
 
   let user;

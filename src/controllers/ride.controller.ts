@@ -17,6 +17,9 @@ import { WalletTransaction } from '../models/WalletTransaction';
 import { SystemConfig } from '../models/SystemConfig';
 import { paymentService } from '../services/payment.service';
 import { fcmService } from '../services/fcm.service';
+import path from 'path';
+import fs from 'fs';
+import { InvoicePdfService, IInvoicePdfData } from '../services/invoicePdf.service';
 
 const generateRideOTP = (): string => String(crypto.randomInt(1000, 9999));
 
@@ -1411,4 +1414,163 @@ export const applyWalletToRide = asyncHandler(async (req: Request, res: Response
     }));
   }
 });
+
+/**
+ * Format helper for Invoice PDF Data
+ */
+const formatInvoiceData = (ride: any, riderProfile: any): IInvoicePdfData => {
+  const invoiceNumber = ride.invoiceNumber || `INV-${new Date(ride.createdAt || Date.now()).getFullYear()}${String(new Date(ride.createdAt || Date.now()).getMonth() + 1).padStart(2, '0')}-${ride._id.toString().slice(-6).toUpperCase()}`;
+
+  const passengerUser = ride.passenger || {};
+  const riderUser = ride.rider || {};
+
+  return {
+    invoiceNumber,
+    invoiceDate: new Date(ride.rideEndedAt || ride.updatedAt || Date.now()).toLocaleDateString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    }),
+    rideId: ride._id.toString(),
+    passenger: {
+      name: passengerUser.name || 'Passenger',
+      phoneNumber: passengerUser.phoneNumber || '',
+      email: passengerUser.email || undefined,
+    },
+    rider: {
+      name: riderUser.name || 'Woosh Driver',
+      phoneNumber: riderUser.phoneNumber || '',
+      vehicleNumber: riderProfile?.vehicleNumber || 'N/A',
+      vehicleModel: riderProfile?.vehicleModel || '',
+      vehicleType: ride.vehicleType || 'Ride',
+    },
+    trip: {
+      pickupAddress: ride.pickup?.address || 'Pickup Location',
+      dropAddress: ride.drop?.address || 'Drop Location',
+      distanceKm: ride.distanceKm || 0,
+      durationMinutes: ride.durationMinutes || 0,
+      startTime: ride.rideStartedAt ? new Date(ride.rideStartedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : undefined,
+      endTime: ride.rideEndedAt ? new Date(ride.rideEndedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : undefined,
+    },
+    fare: {
+      baseFare: ride.estimatedFare || ride.finalFare || 0,
+      waitingCharges: ride.waitingCharges || 0,
+      tipAmount: ride.tipAmount || 0,
+      walletAmountUsed: ride.walletAmountUsed || 0,
+      totalFare: (ride.finalFare || ride.estimatedFare || 0) + (ride.tipAmount || 0),
+      paymentMethod: ride.paymentMethod || 'CASH',
+      paymentStatus: ride.paymentStatus || 'PAID',
+      transactionId: ride.razorpayPaymentId || undefined,
+    },
+  };
+};
+
+/**
+ * @route   GET /api/v1/ride/:id/invoice
+ * @desc    Get trip tax invoice metadata and direct download URL
+ * @access  Protected (Passenger, Rider, Admin)
+ */
+export const getRideInvoice = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const ride = await Ride.findById(id).populate('passenger').populate('rider');
+  if (!ride) throw new ApiError(404, 'Ride not found');
+
+  const userId = req.user?._id;
+  const userRole = req.user?.role;
+  const passengerId = (ride.passenger as any)?._id?.toString() || ride.passenger?.toString();
+  const riderId = (ride.rider as any)?._id?.toString() || ride.rider?.toString();
+
+  const isPassenger = passengerId === userId;
+  const isRider = riderId === userId;
+  const isAdmin = ['admin', 'superadmin', 'super_admin'].includes(userRole || '');
+
+  if (!isPassenger && !isRider && !isAdmin) {
+    throw new ApiError(403, 'You are not authorized to view the invoice for this ride');
+  }
+
+  // Invoice is available if payment is completed or ride is completed/payment completed
+  if (
+    ride.paymentStatus !== PaymentStatus.PAID &&
+    ride.status !== RideStatus.PAYMENT_COMPLETED &&
+    ride.status !== RideStatus.COMPLETED
+  ) {
+    throw new ApiError(400, 'Invoice can only be generated after ride is completed and payment is successful');
+  }
+
+  const riderProfile = ride.rider ? await RiderProfile.findOne({ user: (ride.rider as any)._id || ride.rider }) : null;
+  const invoiceData = formatInvoiceData(ride, riderProfile);
+
+  // Generate and save file if not already on disk
+  const { relativeUrl } = await InvoicePdfService.saveInvoiceFile(ride._id.toString(), invoiceData);
+
+  const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+  const host = req.get('host');
+  const baseUrl = process.env.BACKEND_URL || `${protocol}://${host}`;
+  const directPdfUrl = `${baseUrl}${relativeUrl}`;
+  const downloadApiUrl = `${baseUrl}/api/v1/ride/${ride._id}/invoice/download`;
+
+  if (!ride.invoiceUrl || !ride.invoiceNumber) {
+    ride.invoiceUrl = downloadApiUrl;
+    ride.invoiceNumber = invoiceData.invoiceNumber;
+    await ride.save();
+  }
+
+  res.status(200).json(new ApiResponse(200, 'Invoice fetched successfully', {
+    rideId: ride._id,
+    invoiceNumber: invoiceData.invoiceNumber,
+    invoiceDate: invoiceData.invoiceDate,
+    downloadUrl: downloadApiUrl,
+    directPdfUrl,
+    downloadApiUrl,
+    totalFare: invoiceData.fare.totalFare,
+    paymentMethod: invoiceData.fare.paymentMethod,
+    paymentStatus: invoiceData.fare.paymentStatus,
+    invoiceData,
+  }));
+});
+
+/**
+ * @route   GET /api/v1/ride/:id/invoice/download
+ * @desc    Directly stream/download the trip invoice PDF file
+ * @access  Protected
+ */
+export const downloadRideInvoice = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const ride = await Ride.findById(id).populate('passenger').populate('rider');
+  if (!ride) throw new ApiError(404, 'Ride not found');
+
+  const userId = req.user?._id;
+  const userRole = req.user?.role;
+  const passengerId = (ride.passenger as any)?._id?.toString() || ride.passenger?.toString();
+  const riderId = (ride.rider as any)?._id?.toString() || ride.rider?.toString();
+
+  const isPassenger = passengerId === userId;
+  const isRider = riderId === userId;
+  const isAdmin = ['admin', 'superadmin', 'super_admin'].includes(userRole || '');
+
+  if (!isPassenger && !isRider && !isAdmin) {
+    throw new ApiError(403, 'You are not authorized to download this invoice');
+  }
+
+  if (
+    ride.paymentStatus !== PaymentStatus.PAID &&
+    ride.status !== RideStatus.PAYMENT_COMPLETED &&
+    ride.status !== RideStatus.COMPLETED
+  ) {
+    throw new ApiError(400, 'Invoice can only be downloaded after ride is completed and payment is successful');
+  }
+
+  const riderProfile = ride.rider ? await RiderProfile.findOne({ user: (ride.rider as any)._id || ride.rider }) : null;
+  const invoiceData = formatInvoiceData(ride, riderProfile);
+
+  const pdfBuffer = await InvoicePdfService.generateInvoiceBuffer(invoiceData);
+  const filename = `Woosh_Invoice_${invoiceData.invoiceNumber}.pdf`;
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.setHeader('Content-Length', pdfBuffer.length);
+
+  res.status(200).end(pdfBuffer);
+});
+
 
