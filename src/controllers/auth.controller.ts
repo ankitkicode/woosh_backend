@@ -61,6 +61,7 @@ export const sendOTP = asyncHandler(async (req: Request, res: Response) => {
 
   // Cross-role and login validation logic
   console.log(`[sendOTP] Role: ${role}, Action: ${action}, Phone: ${phoneNumber}`);
+
   if (role === UserRole.RIDER) {
     const existingUser = await User.findOne({ phoneNumber });
 
@@ -96,7 +97,7 @@ export const sendOTP = asyncHandler(async (req: Request, res: Response) => {
 
   const expiresAt = getOTPExpiry(OTP_EXPIRY_MINUTES);
 
-  await OTP.create({ phoneNumber, otp, expiresAt });
+  await OTP.create({ phoneNumber, otp, flag: action, expiresAt });
 
   console.log(`\n========================================`);
   console.log(`📲 OTP for ${phoneNumber}: ${otp}`);

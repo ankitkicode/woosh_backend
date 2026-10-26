@@ -6,7 +6,7 @@ export const sendOTPSchema = z.object({
     .trim()
     .regex(/^[6-9]\d{9}$/, 'Please enter a valid 10-digit Indian mobile number'),
   role: z.enum(['passenger', 'rider', 'admin', 'super_admin']).optional(),
-  action: z.enum(['login', 'register']).optional(),
+  action: z.enum(['login', 'register', 'forgot_mpin', 'reset_mpin', 'set_mpin', 'set-mpin']).optional(),
 });
 
 export const verifyOTPSchema = z.object({
@@ -16,6 +16,7 @@ export const verifyOTPSchema = z.object({
     .regex(/^[6-9]\d{9}$/, 'Please enter a valid 10-digit Indian mobile number'),
   otp: z.string().length(6, 'OTP must be exactly 6 digits'),
   role: z.enum(['passenger', 'rider', 'admin', 'super_admin']).optional(),
+  action: z.enum(['login', 'register', 'forgot_mpin', 'reset_mpin', 'set_mpin', 'set-mpin']).optional(),
   deviceId: z.string().min(1, 'Device ID is required for session management').optional(),
   fcmToken: z.string().optional(),
   os: z.string().optional(),

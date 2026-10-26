@@ -54,7 +54,7 @@
               "mode": "raw",
               "raw": "{\n  \"phoneNumber\": \"9876543210\",\n  \"role\": \"rider\",\n  \"action\": \"login\"\n}"
             },
-            "description": "Send OTP for Rider. 'action' can be 'login' (checks if account exists) or 'register' (checks if not already registered)."
+            "description": "Send OTP for Rider. 'action' can be 'login' (checks if account exists), 'register' (checks if not already registered), or 'forgot_mpin' (for resetting MPIN)."
           }
         },
         {
@@ -673,8 +673,9 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"latitude\": 19.0760,\n  \"longitude\": 72.8777,\n  \"address\": \"Western Express Highway, Andheri, Mumbai\"\n}"
-            }
+              "raw": "{\n  \"rideId\": \"{{rideId}}\",\n  \"latitude\": 19.0760,\n  \"longitude\": 72.8777,\n  \"address\": \"Western Express Highway, Andheri, Mumbai\"\n}"
+            },
+            "description": "Triggers emergency SOS alert. Dispatches instant WhatsApp alerts with Google Maps live location to user emergency contacts and Admin (9011013612), marks ride in SOS state, and alerts dispatch dashboard."
           }
         },
         {
@@ -965,7 +966,44 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"rating\": 5,\n  \"comment\": \"Polite and punctual passenger\"\n}"
-            }
+            },
+            "description": "Rider rates passenger (1-5 stars) and leaves review comments."
+          }
+        },
+        {
+          "name": "Get Ride Invoice & Download URL",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride/{{rideId}}/invoice",
+              "host": ["{{baseUrl}}"],
+              "path": ["ride", "{{rideId}}", "invoice"]
+            },
+            "description": "Returns trip tax invoice details, fare breakdown and direct PDF download URL for completed and paid rides."
+          }
+        },
+        {
+          "name": "Download Ride Invoice PDF",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride/{{rideId}}/invoice/download",
+              "host": ["{{baseUrl}}"],
+              "path": ["ride", "{{rideId}}", "invoice", "download"]
+            },
+            "description": "Directly streams and downloads the generated PDF trip invoice file (Woosh_Invoice_INV-XXXX.pdf)."
           }
         }
       ]
